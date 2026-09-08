@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CascadeSight — Infrastructure Cascade Risk & Collapse Simulator</title>
+    <!-- Google Fonts & Chart.js -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Header -->
+        <header class="navbar">
+            <div class="brand">
+                <div class="logo-icon">⚡</div>
+                <div class="brand-text">
+                    <h1>CascadeSight</h1>
+                    <span class="subtitle">Systemic Infrastructure Cascade Risk Predictor</span>
+                </div>
+            </div>
+            
+            <div class="nav-controls">
+                <div class="mode-toggle">
+                    <button id="btn-synthetic" class="toggle-btn active" onclick="switchGraphMode('synthetic')">
+                        🏢 Smart City / Cloud Graph
+                    </button>
+                    <button id="btn-meta" class="toggle-btn" onclick="switchGraphMode('meta')">
+                        🌐 Meta Oct 2021 Case Study
+                    </button>
+                </div>
+                <div class="badge-tag">TST Competition Prototype</div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Content -->
+        <main class="dashboard-grid">
+            
+            <!-- Left Column: Graph Visualizer & Simulation Controls -->
+            <section class="card graph-card">
+                <div class="card-header">
+                    <div class="title-wrap">
+                        <h2>Interactive Dependency Graph</h2>
+                        <span class="hint">Click any node to select it as initial failure trigger</span>
+                    </div>
+                    
+                    <div class="graph-legend">
+                        <span class="legend-item"><i class="dot healthy"></i> Healthy</span>
+                        <span class="legend-item"><i class="dot at-risk"></i> At Risk</span>
+                        <span class="legend-item"><i class="dot failed"></i> Failed</span>
+                        <span class="legend-item"><i class="dot hspof"></i> Hidden Single Point of Failure</span>
+                    </div>
+                </div>
+
+                <!-- Interactive Canvas -->
+                <div class="canvas-container">
+                    <canvas id="graphCanvas"></canvas>
+                    
+                    <div id="canvas-overlay" class="canvas-overlay">
+                        <div class="overlay-stat">
+                            <span class="lbl">Selected Trigger:</span>
+                            <span id="lbl-selected-node" class="val highlight">Internal Config Service</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Simulation Control Bar -->
+                <div class="control-bar">
+                    <div class="control-group">
+                        <button id="btn-trigger" class="btn btn-danger" onclick="triggerCascade()">
+                            🔥 Fail Selected Node & Run Cascade
+                        </button>
+                        <button id="btn-play" class="btn btn-secondary" onclick="togglePlayback()">
+                            ▶ Play Step-by-Step
+                        </button>
+                        <button id="btn-reset" class="btn btn-outline" onclick="resetSimulation()">
+                            🔄 Reset Graph
+                        </button>
+                    </div>
+
+                    <div class="control-group threshold-slider">
+                        <label for="slider-threshold">Cascade Threshold (θ): <strong id="val-threshold">0.40</strong></label>
+                        <input type="range" id="slider-threshold" min="0.10" max="0.80" step="0.05" value="0.40" oninput="updateThreshold(this.value)">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Right Column: Live Metrics, Leaderboard & Tipping Point -->
+            <aside class="right-panel">
+                
+                <!-- Live Impact Metrics -->
+                <div class="metrics-row">
+                    <div class="metric-card">
+                        <span class="metric-label">System Health</span>
+                        <span id="metric-health" class="metric-value green">100.0%</span>
+                        <span class="metric-sub">Operational Nodes</span>
+                    </div>
+                    
+                    <div class="metric-card">
+                        <span class="metric-label">Blast Radius</span>
+                        <span id="metric-blast" class="metric-value red">0.0%</span>
+                        <span id="metric-blast-nodes" class="metric-sub">0 / 20 Nodes Failed</span>
+                    </div>
+
+                    <div class="metric-card">
+                        <span class="metric-label">Cascade Depth</span>
+                        <span id="metric-depth" class="metric-value yellow">0 steps</span>
+                        <span class="metric-sub">Timesteps to Equilibrium</span>
+                    </div>
+                </div>
+
+                <!-- Cascade Risk Score (CRS) Leaderboard -->
+                <div class="card leaderboard-card">
+                    <div class="card-header">
+                        <h3>Cascade Risk Score (CRS) Rankings</h3>
+                        <span class="badge red">Formula: (Blast %)² / (100 × Degree)</span>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Node Name</th>
+                                    <th>Connections</th>
+                                    <th>Blast %</th>
+                                    <th>CRS Score</th>
+                                    <th>Classification</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tbody-leaderboard">
+                                <!-- Populated dynamically by app.js -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Tipping Point Non-Linear Curve -->
+                <div class="card chart-card">
+                    <div class="card-header">
+                        <h3>Non-Linear Tipping Point (Percolation Curve)</h3>
+                        <span class="hint">System collapse % vs failure threshold θ</span>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="tippingChart"></canvas>
+                    </div>
+                </div>
+
+            </aside>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
