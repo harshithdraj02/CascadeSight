@@ -7,7 +7,7 @@
     <!-- Google Fonts & Chart.js -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="style.css">
 </head>
@@ -19,14 +19,14 @@
                 <div class="logo-icon">⚡</div>
                 <div class="brand-text">
                     <h1>CascadeSight</h1>
-                    <span class="subtitle">Systemic Infrastructure Cascade Risk Predictor</span>
+                    <span class="subtitle">Systemic Infrastructure Cascade Risk Predictor & Collapse Simulator</span>
                 </div>
             </div>
             
             <div class="nav-controls">
                 <div class="mode-toggle">
                     <button id="btn-synthetic" class="toggle-btn active" onclick="switchGraphMode('synthetic')">
-                        🏢 Smart City / Cloud Graph
+                        🏢 Smart City / Cloud Microservices
                     </button>
                     <button id="btn-meta" class="toggle-btn" onclick="switchGraphMode('meta')">
                         🌐 Meta Oct 2021 Case Study
@@ -44,25 +44,49 @@
                 <div class="card-header">
                     <div class="title-wrap">
                         <h2>Interactive Dependency Graph</h2>
-                        <span class="hint">Click any node to select it as initial failure trigger</span>
+                        <span class="hint">Click or drag any node to inspect & select as failure trigger</span>
                     </div>
                     
                     <div class="graph-legend">
                         <span class="legend-item"><i class="dot healthy"></i> Healthy</span>
                         <span class="legend-item"><i class="dot at-risk"></i> At Risk</span>
                         <span class="legend-item"><i class="dot failed"></i> Failed</span>
-                        <span class="legend-item"><i class="dot hspof"></i> Hidden Single Point of Failure</span>
+                        <span class="legend-item"><i class="dot hspof"></i> Hidden Danger (HSPOF)</span>
                     </div>
                 </div>
 
+                <!-- Scenario Quick Presets -->
+                <div class="preset-bar">
+                    <span class="preset-label">Quick Scenarios:</span>
+                    <button class="btn-preset" onclick="selectPreset('Internal Config Service')">⚡ Config Service (HSPOF)</button>
+                    <button class="btn-preset" onclick="selectPreset('User DB Cluster')">💾 DB Cluster Failure</button>
+                    <button class="btn-preset" onclick="selectPreset('Auth Service')">🔒 Auth Breach</button>
+                    <button class="btn-preset" onclick="selectPreset('Core Network Gateway')">🌐 Core Network Blackout</button>
+                </div>
+
                 <!-- Interactive Canvas -->
-                <div class="canvas-container">
+                <div class="canvas-container" id="canvasContainer">
                     <canvas id="graphCanvas"></canvas>
                     
+                    <!-- Overlay Trigger Tag -->
                     <div id="canvas-overlay" class="canvas-overlay">
                         <div class="overlay-stat">
                             <span class="lbl">Selected Trigger:</span>
                             <span id="lbl-selected-node" class="val highlight">Internal Config Service</span>
+                        </div>
+                    </div>
+
+                    <!-- Floating Node Inspector Tooltip -->
+                    <div id="node-inspector" class="node-inspector hidden">
+                        <div class="inspector-header">
+                            <h4 id="inspect-title">Node Title</h4>
+                            <span id="inspect-status" class="badge-status">HEALTHY</span>
+                        </div>
+                        <div class="inspector-body">
+                            <div class="inspect-row"><span>Category:</span> <strong id="inspect-cat">config</strong></div>
+                            <div class="inspect-row"><span>Degree:</span> <strong id="inspect-deg">7</strong></div>
+                            <div class="inspect-row"><span>CRS Score:</span> <strong id="inspect-crs" class="text-glow">9.14</strong></div>
+                            <div class="inspect-row"><span>Upstream Deps:</span> <span id="inspect-deps" class="mono-text">None</span></div>
                         </div>
                     </div>
                 </div>
@@ -82,8 +106,19 @@
                     </div>
 
                     <div class="control-group threshold-slider">
-                        <label for="slider-threshold">Cascade Threshold (θ): <strong id="val-threshold">0.40</strong></label>
+                        <label for="slider-threshold">Redundancy Tolerance (θ): <strong id="val-threshold">0.40</strong></label>
                         <input type="range" id="slider-threshold" min="0.10" max="0.80" step="0.05" value="0.40" oninput="updateThreshold(this.value)">
+                    </div>
+                </div>
+
+                <!-- Timestep Causality & Audit Log Panel -->
+                <div class="causality-panel">
+                    <div class="causality-header">
+                        <h3>📋 Cascade Causality & Failure Propagation Log</h3>
+                        <span class="hint" id="lbl-step-summary">Ready for simulation trigger</span>
+                    </div>
+                    <div class="causality-log" id="causalityLog">
+                        <div class="log-entry info">System initialized in operational equilibrium. Click a node and run cascade to trace step-by-step collapse causality.</div>
                     </div>
                 </div>
             </section>
@@ -115,8 +150,11 @@
                 <!-- Cascade Risk Score (CRS) Leaderboard -->
                 <div class="card leaderboard-card">
                     <div class="card-header">
-                        <h3>Cascade Risk Score (CRS) Rankings</h3>
-                        <span class="badge red">Formula: (Blast %)² / (100 × Degree)</span>
+                        <div class="title-wrap">
+                            <h3>Cascade Risk Score (CRS) Rankings</h3>
+                            <span class="badge red">Formula: (Blast %)² / (100 × Degree)</span>
+                        </div>
+                        <input type="text" id="input-search-node" placeholder="🔍 Search node..." onkeyup="filterLeaderboard(this.value)" class="search-input">
                     </div>
                     
                     <div class="table-container">
@@ -141,8 +179,11 @@
                 <!-- Tipping Point Non-Linear Curve -->
                 <div class="card chart-card">
                     <div class="card-header">
-                        <h3>Non-Linear Tipping Point (Percolation Curve)</h3>
-                        <span class="hint">System collapse % vs failure threshold θ</span>
+                        <div>
+                            <h3>Non-Linear Tipping Point (Percolation Curve)</h3>
+                            <span class="hint">System collapse % vs sensitivity threshold θ</span>
+                        </div>
+                        <span id="badge-tipping" class="badge yellow">Tipping Point: θ = 0.40</span>
                     </div>
                     <div class="chart-container">
                         <canvas id="tippingChart"></canvas>

@@ -1,4 +1,4 @@
-// CascadeSight Dashboard - Frontend Logic
+// CascadeSight Dashboard - Advanced Frontend Engine & Visualizer
 
 let currentGraphMode = 'synthetic';
 let graphData = { nodes: [], edges: [] };
@@ -10,10 +10,14 @@ let currentStepIndex = 0;
 let playbackTimer = null;
 let isPlaying = false;
 
-// Canvas & Context
+// Canvas & Physics Engine
 let canvas = null;
 let ctx = null;
-let nodePositions = {}; // id -> {x, y, vx, vy, radius}
+let nodePositions = {}; // id -> {x, y, vx, vy, radius, state, label, category, degree}
+let isDragging = false;
+let draggedNode = null;
+let hoveredNode = null;
+let particleOffset = 0;
 
 // Chart Instance
 let tippingChart = null;
@@ -21,12 +25,20 @@ let tippingChart = null;
 document.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('graphCanvas');
     ctx = canvas.getContext('2d');
+    
     resizeCanvas();
-
     window.addEventListener('resize', resizeCanvas);
-    canvas.addEventListener('click', handleCanvasClick);
 
-    // Initial Load
+    // Canvas Mouse & Touch Events
+    canvas.addEventListener('mousedown', handleMouseDown);
+    canvas.addEventListener('mousemove', handleMouseMove);
+    canvas.addEventListener('mouseup', handleMouseUp);
+    canvas.addEventListener('mouseleave', handleMouseUp);
+
+    // Physics & Particle Animation Loop
+    requestAnimationFrame(animationLoop);
+
+    // Initial Dashboard Load
     initDashboard();
 });
 
@@ -35,8 +47,8 @@ function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
-    if (graphData.nodes.length > 0) {
-        drawGraph();
+    if (graphData.nodes && graphData.nodes.length > 0) {
+        setupNodePositions();
     }
 }
 
@@ -51,13 +63,9 @@ async function switchGraphMode(mode) {
     document.getElementById('btn-synthetic').classList.toggle('active', mode === 'synthetic');
     document.getElementById('btn-meta').classList.toggle('active', mode === 'meta');
 
-    if (mode === 'meta') {
-        selectedNode = 'Backbone BGP Router Config';
-    } else {
-        selectedNode = 'Internal Config Service';
-    }
-    
+    selectedNode = (mode === 'meta') ? 'Backbone BGP Router Config' : 'Internal Config Service';
     document.getElementById('lbl-selected-node').innerText = selectedNode;
+    
     resetSimulation();
     await initDashboard();
 }
@@ -75,31 +83,116 @@ async function loadGraph(mode) {
 
 function setupNodePositions() {
     const width = canvas.width || 800;
-    const height = canvas.height || 500;
+    const height = canvas.height || 520;
     const centerX = width / 2;
     const centerY = height / 2;
     const numNodes = graphData.nodes.length;
-    const radius = Math.min(width, height) * 0.35;
+    const radius = Math.min(width, height) * 0.36;
 
     nodePositions = {};
 
     graphData.nodes.forEach((node, i) => {
-        // Arrange initially in circle layout with slight jitter
         const angle = (i / numNodes) * 2 * Math.PI;
         nodePositions[node.id] = {
-            x: centerX + radius * Math.cos(angle),
-            y: centerY + radius * Math.sin(angle),
-            radius: 14 + (node.degree || 1) * 1.5,
-            state: 'healthy' // 'healthy', 'at-risk', 'failed'
+            id: node.id,
+            label: node.label || node.id,
+            category: node.category || 'default',
+            x: centerX + radius * Math.cos(angle) + (Math.random() - 0.5) * 20,
+            y: centerY + radius * Math.sin(angle) + (Math.random() - 0.5) * 20,
+            vx: 0,
+            vy: 0,
+            radius: Math.max(14, 12 + (node.degree || 1) * 1.6),
+            state: 'healthy', // 'healthy', 'at-risk', 'failed'
+            inDegree: node.inDegree,
+            outDegree: node.outDegree,
+            degree: node.degree
         };
     });
 }
 
+// Animation & Physics Loop
+function animationLoop() {
+    particleOffset = (particleOffset + 0.8) % 30;
+    applyForcePhysics();
+    drawGraph();
+    requestAnimationFrame(animationLoop);
+}
+
+function applyForcePhysics() {
+    const nodes = Object.values(nodePositions);
+    if (nodes.length === 0) return;
+
+    const width = canvas.width || 800;
+    const height = canvas.height || 520;
+    const centerX = width / 2;
+    const centerY = height / 2;
+
+    // Repulsion between nodes
+    for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+            const n1 = nodes[i];
+            const n2 = nodes[j];
+            const dx = n2.x - n1.x;
+            const dy = n2.y - n1.y;
+            const dist = Math.hypot(dx, dy) || 1;
+            const minDist = (n1.radius + n2.radius) * 2.2;
+
+            if (dist < minDist) {
+                const force = (minDist - dist) / dist * 0.05;
+                n1.vx -= dx * force;
+                n1.vy -= dy * force;
+                n2.vx += dx * force;
+                n2.vy += dy * force;
+            }
+        }
+    }
+
+    // Spring attraction along edges
+    graphData.edges.forEach(edge => {
+        const src = nodePositions[edge.source];
+        const tgt = nodePositions[edge.target];
+        if (!src || !tgt) return;
+
+        const dx = tgt.x - src.x;
+        const dy = tgt.y - src.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const targetDist = 130;
+        const force = (dist - targetDist) * 0.002;
+
+        src.vx += dx * force;
+        src.vy += dy * force;
+        tgt.vx -= dx * force;
+        tgt.vy -= dy * force;
+    });
+
+    // Central gravity & position update
+    nodes.forEach(n => {
+        if (n === draggedNode) return; // User is dragging this node
+
+        const dx = centerX - n.x;
+        const dy = centerY - n.y;
+        n.vx += dx * 0.0005;
+        n.vy += dy * 0.0005;
+
+        // Damping
+        n.vx *= 0.85;
+        n.vy *= 0.85;
+
+        n.x += n.vx;
+        n.y += n.vy;
+
+        // Boundary padding
+        const pad = n.radius + 10;
+        n.x = Math.max(pad, Math.min(width - pad, n.x));
+        n.y = Math.max(pad, Math.min(height - pad, n.y));
+    });
+}
+
 function drawGraph() {
-    if (!ctx) return;
+    if (!ctx || !canvas) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Edges (Directed Dependency Arrows)
+    // Draw Edges (Directed Arrows & Particles)
     graphData.edges.forEach(edge => {
         const src = nodePositions[edge.source];
         const tgt = nodePositions[edge.target];
@@ -108,39 +201,48 @@ function drawGraph() {
         ctx.beginPath();
         ctx.moveTo(src.x, src.y);
         ctx.lineTo(tgt.x, tgt.y);
-        
-        let strokeColor = 'rgba(255, 255, 255, 0.15)';
+
+        let strokeColor = 'rgba(255, 255, 255, 0.12)';
+        let lineWidth = 1.2;
+
         if (src.state === 'failed' && tgt.state === 'failed') {
-            strokeColor = 'rgba(239, 68, 68, 0.6)';
+            strokeColor = 'rgba(239, 68, 68, 0.7)';
+            lineWidth = 2.5;
         } else if (src.state === 'failed') {
-            strokeColor = 'rgba(245, 158, 11, 0.5)';
+            strokeColor = 'rgba(245, 158, 11, 0.6)';
+            lineWidth = 2.0;
+        } else if (src.id === hoveredNode || tgt.id === hoveredNode) {
+            strokeColor = 'rgba(96, 165, 250, 0.6)';
+            lineWidth = 2.0;
         }
-        
+
         ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = (src.state === 'failed') ? 2 : 1;
+        ctx.lineWidth = lineWidth;
         ctx.stroke();
 
-        // Draw arrow head
+        // Draw Arrowhead
         drawArrowHead(src, tgt, strokeColor);
+
+        // Particle Pulses on Active Edges
+        if (src.state === 'failed') {
+            drawEdgeParticle(src, tgt, 'rgba(239, 68, 68, 0.9)');
+        }
     });
 
     // Draw Nodes
-    graphData.nodes.forEach(node => {
-        const pos = nodePositions[node.id];
-        if (!pos) return;
-
+    Object.values(nodePositions).forEach(node => {
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, pos.radius, 0, 2 * Math.PI);
+        ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
 
         let fillColor = '#10b981'; // Green
         let glowColor = 'rgba(16, 185, 129, 0.4)';
 
-        if (pos.state === 'failed') {
+        if (node.state === 'failed') {
             fillColor = '#ef4444'; // Red
-            glowColor = 'rgba(239, 68, 68, 0.8)';
-        } else if (pos.state === 'at-risk') {
+            glowColor = 'rgba(239, 68, 68, 0.85)';
+        } else if (node.state === 'at-risk') {
             fillColor = '#f59e0b'; // Yellow
-            glowColor = 'rgba(245, 158, 11, 0.6)';
+            glowColor = 'rgba(245, 158, 11, 0.7)';
         }
 
         if (node.id === selectedNode) {
@@ -149,25 +251,24 @@ function drawGraph() {
 
         ctx.fillStyle = fillColor;
         ctx.shadowColor = glowColor;
-        ctx.shadowBlur = 12;
+        ctx.shadowBlur = (node.id === selectedNode || node.state === 'failed') ? 18 : 10;
         ctx.fill();
         ctx.shadowBlur = 0; // reset
 
-        ctx.strokeStyle = (node.id === selectedNode) ? '#ffffff' : 'rgba(255, 255, 255, 0.3)';
-        ctx.lineWidth = (node.id === selectedNode) ? 3 : 1.5;
+        ctx.strokeStyle = (node.id === selectedNode) ? '#ffffff' : (node.id === hoveredNode ? '#60a5fa' : 'rgba(255, 255, 255, 0.25)');
+        ctx.lineWidth = (node.id === selectedNode) ? 3.5 : (node.id === hoveredNode ? 2.5 : 1.5);
         ctx.stroke();
 
-        // Label
-        ctx.fillStyle = '#f3f4f6';
-        ctx.font = '11px Inter, sans-serif';
+        // Node Label
+        ctx.fillStyle = (node.id === selectedNode) ? '#ffffff' : '#e2e8f0';
+        ctx.font = (node.id === selectedNode) ? '600 12px Inter, sans-serif' : '500 11px Inter, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText(node.label || node.id, pos.x, pos.y + pos.radius + 14);
+        ctx.fillText(node.label, node.x, node.y + node.radius + 15);
     });
 }
 
 function drawArrowHead(src, tgt, color) {
     const angle = Math.atan2(tgt.y - src.y, tgt.x - src.x);
-    const dist = Math.hypot(tgt.x - src.x, tgt.y - src.y);
     const offset = tgt.radius + 4;
 
     const arrowX = tgt.x - offset * Math.cos(angle);
@@ -182,23 +283,103 @@ function drawArrowHead(src, tgt, color) {
     ctx.fill();
 }
 
-function handleCanvasClick(e) {
-    const rect = canvas.getBoundingClientRect();
-    const clickX = e.clientX - rect.left;
-    const clickY = e.clientY - rect.top;
+function drawEdgeParticle(src, tgt, color) {
+    const angle = Math.atan2(tgt.y - src.y, tgt.x - src.x);
+    const dist = Math.hypot(tgt.x - src.x, tgt.y - src.y);
+    const pDist = (particleOffset / 30) * dist;
 
-    for (let node of graphData.nodes) {
-        const pos = nodePositions[node.id];
-        if (!pos) continue;
-        const dist = Math.hypot(clickX - pos.x, clickY - pos.y);
-        if (dist <= pos.radius + 5) {
-            selectedNode = node.id;
-            document.getElementById('lbl-selected-node').innerText = selectedNode;
-            drawGraph();
-            loadTippingPoint();
-            break;
+    const px = src.x + pDist * Math.cos(angle);
+    const py = src.y + pDist * Math.sin(angle);
+
+    ctx.beginPath();
+    ctx.arc(px, py, 3, 0, 2 * Math.PI);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+}
+
+// Mouse Event Handlers
+function getNodeAtPosition(x, y) {
+    for (let node of Object.values(nodePositions)) {
+        const dist = Math.hypot(x - node.x, y - node.y);
+        if (dist <= node.radius + 6) return node;
+    }
+    return null;
+}
+
+function handleMouseDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    const clicked = getNodeAtPosition(x, y);
+    if (clicked) {
+        isDragging = true;
+        draggedNode = clicked;
+        selectedNode = clicked.id;
+        document.getElementById('lbl-selected-node').innerText = selectedNode;
+        loadTippingPoint();
+        updateNodeInspector(clicked);
+    }
+}
+
+function handleMouseMove(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    if (isDragging && draggedNode) {
+        draggedNode.x = x;
+        draggedNode.y = y;
+        draggedNode.vx = 0;
+        draggedNode.vy = 0;
+    } else {
+        const hovered = getNodeAtPosition(x, y);
+        if (hovered !== hoveredNode) {
+            hoveredNode = hovered ? hovered.id : null;
+            if (hovered) {
+                updateNodeInspector(hovered);
+            }
         }
     }
+}
+
+function handleMouseUp() {
+    isDragging = false;
+    draggedNode = null;
+}
+
+function updateNodeInspector(node) {
+    const inspector = document.getElementById('node-inspector');
+    if (!node) {
+        inspector.classList.add('hidden');
+        return;
+    }
+
+    inspector.classList.remove('hidden');
+    document.getElementById('inspect-title').innerText = node.label;
+    
+    const statusBadge = document.getElementById('inspect-status');
+    statusBadge.innerText = node.state.toUpperCase();
+    statusBadge.className = `badge-status ${node.state}`;
+
+    document.getElementById('inspect-cat').innerText = node.category;
+    document.getElementById('inspect-deg').innerText = `${node.degree} (${node.inDegree} in / ${node.outDegree} out)`;
+
+    // Find upstream deps
+    const deps = graphData.edges.filter(e => e.target === node.id).map(e => e.source);
+    document.getElementById('inspect-deps').innerText = deps.length > 0 ? deps.slice(0, 2).join(', ') + (deps.length > 2 ? '...' : '') : 'None (Root Node)';
+}
+
+function selectPreset(nodeId) {
+    selectedNode = nodeId;
+    document.getElementById('lbl-selected-node').innerText = selectedNode;
+    if (nodePositions[nodeId]) {
+        updateNodeInspector(nodePositions[nodeId]);
+    }
+    triggerCascade();
 }
 
 async function triggerCascade() {
@@ -216,6 +397,7 @@ async function triggerCascade() {
 
         simulationResult = await res.json();
         applySimulationStep(simulationResult.stepHistory.length - 1);
+        populateCausalityLog(simulationResult);
     } catch (err) {
         console.error('Error triggering cascade:', err);
     }
@@ -225,23 +407,21 @@ function applySimulationStep(stepIdx) {
     if (!simulationResult || !simulationResult.stepHistory) return;
 
     currentStepIndex = stepIdx;
-    const step = simulationResult.stepHistory[stepIdx];
 
-    // Update node states
     const failedSoFar = new Set();
     for (let i = 0; i <= stepIdx; i++) {
         simulationResult.stepHistory[i].newlyFailed.forEach(id => failedSoFar.add(id));
     }
 
     graphData.nodes.forEach(node => {
-        if (failedSoFar.has(node.id)) {
-            nodePositions[node.id].state = 'failed';
-        } else {
-            nodePositions[node.id].state = 'healthy';
+        if (nodePositions[node.id]) {
+            if (failedSoFar.has(node.id)) {
+                nodePositions[node.id].state = 'failed';
+            } else {
+                nodePositions[node.id].state = 'healthy';
+            }
         }
     });
-
-    drawGraph();
 
     // Update Live Metrics
     const totalNodes = simulationResult.totalNodes;
@@ -253,6 +433,28 @@ function applySimulationStep(stepIdx) {
     document.getElementById('metric-blast').innerText = `${blastPct}%`;
     document.getElementById('metric-blast-nodes').innerText = `${failedCount} / ${totalNodes} Nodes Failed`;
     document.getElementById('metric-depth').innerText = `Step ${stepIdx} of ${simulationResult.totalTimesteps}`;
+}
+
+function populateCausalityLog(result) {
+    const logContainer = document.getElementById('causalityLog');
+    const stepSummary = document.getElementById('lbl-step-summary');
+    logContainer.innerHTML = '';
+
+    stepSummary.innerText = `Blast Radius: ${result.blastRadiusPercentage}% (${result.totalFailedNodes}/${result.totalNodes} nodes) in ${result.totalTimesteps} steps`;
+
+    result.stepHistory.forEach(step => {
+        const div = document.createElement('div');
+        if (step.timestep === 0) {
+            div.className = 'log-entry trigger';
+            div.innerText = `[t=0] 🚨 TRIGGER INITIALIZED: Primary failure triggered at [${step.newlyFailed.join(', ')}]`;
+        } else {
+            div.className = 'log-entry collapse';
+            div.innerText = `[t=${step.timestep}] 💥 CASCADE STEP: ${step.newlyFailed.length} nodes collapsed [${step.newlyFailed.join(', ')}] (Exceeded threshold θ=${result.thresholdUsed})`;
+        }
+        logContainer.appendChild(div);
+    });
+
+    logContainer.scrollTop = logContainer.scrollHeight;
 }
 
 function togglePlayback() {
@@ -278,7 +480,7 @@ function startPlayback() {
         } else {
             pausePlayback();
         }
-    }, 800);
+    }, 900);
 }
 
 function pausePlayback() {
@@ -298,18 +500,30 @@ function resetSimulation() {
         });
     }
 
-    drawGraph();
-
     document.getElementById('metric-health').innerText = '100.0%';
     document.getElementById('metric-blast').innerText = '0.0%';
     document.getElementById('metric-blast-nodes').innerText = `0 / ${graphData.nodes.length} Nodes Failed`;
     document.getElementById('metric-depth').innerText = '0 steps';
+
+    document.getElementById('causalityLog').innerHTML = `
+        <div class="log-entry info">System initialized in operational equilibrium. Click a node and run cascade to trace step-by-step collapse causality.</div>
+    `;
+    document.getElementById('lbl-step-summary').innerText = 'Ready for simulation trigger';
 }
 
 function updateThreshold(val) {
     currentThreshold = parseFloat(val);
     document.getElementById('val-threshold').innerText = parseFloat(val).toFixed(2);
     loadRiskScores();
+}
+
+function filterLeaderboard(searchTerm) {
+    const term = searchTerm.toLowerCase();
+    const rows = document.querySelectorAll('#tbody-leaderboard tr');
+    rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        row.style.display = text.includes(term) ? '' : 'none';
+    });
 }
 
 async function loadRiskScores() {
@@ -324,7 +538,7 @@ async function loadRiskScores() {
             const tr = document.createElement('tr');
             const classification = item.isHiddenCriticalNode 
                 ? '<span class="badge pink">⚠️ Hidden Single Point</span>' 
-                : (item.degree >= 8 ? '<span class="badge red">High Connection Hub</span>' : '<span class="badge gray">Standard Node</span>');
+                : (item.degree >= 7 ? '<span class="badge red">High Connection Hub</span>' : '<span class="badge gray">Standard Node</span>');
 
             tr.innerHTML = `
                 <td><strong>#${index + 1}</strong></td>
@@ -339,7 +553,9 @@ async function loadRiskScores() {
             tr.onclick = () => {
                 selectedNode = item.node;
                 document.getElementById('lbl-selected-node').innerText = selectedNode;
-                drawGraph();
+                if (nodePositions[item.node]) {
+                    updateNodeInspector(nodePositions[item.node]);
+                }
                 loadTippingPoint();
             };
 
@@ -362,6 +578,7 @@ async function loadTippingPoint() {
         });
 
         const data = await res.json();
+        document.getElementById('badge-tipping').innerText = `Tipping Point: θ = ${data.tippingPointThreshold.toFixed(2)}`;
         renderTippingChart(data.curve, data.tippingPointThreshold);
     } catch (err) {
         console.error('Error loading tipping point:', err);
@@ -400,13 +617,13 @@ function renderTippingChart(curveData, tippingPointThreshold) {
             scales: {
                 x: {
                     grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    ticks: { color: '#9ca3af', font: { size: 10 } }
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
                 },
                 y: {
                     min: 0,
                     max: 100,
                     grid: { color: 'rgba(255, 255, 255, 0.05)' },
-                    ticks: { color: '#9ca3af', font: { size: 10 }, callback: v => v + '%' }
+                    ticks: { color: '#94a3b8', font: { size: 10 }, callback: v => v + '%' }
                 }
             }
         }
