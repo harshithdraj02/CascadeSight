@@ -151,32 +151,33 @@ function applyForcePhysics() {
     const centerX = width / 2;
     const centerY = height / 2;
 
-    // Repulsion between all pairs of nodes (Coulomb electrostatic force)
-    const kRepulsion = 5500;
+    // Node-to-node separation & collision avoidance
     for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
             const n1 = nodes[i];
             const n2 = nodes[j];
             const dx = n2.x - n1.x;
             const dy = n2.y - n1.y;
-            const distSq = dx * dx + dy * dy;
-            const dist = Math.sqrt(distSq) || 1;
+            const dist = Math.hypot(dx, dy) || 1;
 
-            // Coulomb repulsion with soft minimum to prevent instability
-            const force = kRepulsion / Math.max(distSq, 350);
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-
-            n1.vx -= fx;
-            n1.vy -= fy;
-            n2.vx += fx;
-            n2.vy += fy;
+            if (dist < 260) {
+                const minDist = n1.radius + n2.radius + 36;
+                let force = 0;
+                if (dist < minDist) {
+                    force = (minDist - dist) / dist * 0.35;
+                } else {
+                    force = ((260 - dist) / 260) * 0.04;
+                }
+                n1.vx -= dx * force;
+                n1.vy -= dy * force;
+                n2.vx += dx * force;
+                n2.vy += dy * force;
+            }
         }
     }
 
     // Spring attraction along edges (Hooke's law)
-    const idealDist = 135;
-    const springK = 0.012;
+    const targetDist = 120;
     graphData.edges.forEach(edge => {
         const src = nodePositions[edge.source];
         const tgt = nodePositions[edge.target];
@@ -185,7 +186,7 @@ function applyForcePhysics() {
         const dx = tgt.x - src.x;
         const dy = tgt.y - src.y;
         const dist = Math.hypot(dx, dy) || 1;
-        const force = (dist - idealDist) * springK;
+        const force = (dist - targetDist) * 0.008;
 
         const fx = (dx / dist) * force;
         const fy = (dy / dist) * force;
@@ -193,28 +194,21 @@ function applyForcePhysics() {
         src.vx += fx;
         src.vy += fy;
         tgt.vx -= fx;
-        tgt.vy -= fy;
+        tgt.vy -= dy * force;
     });
 
-    // Central gravity & position update
+    // Centering gravity & position update
     nodes.forEach(n => {
         if (n === draggedNode) return; // User is dragging this node
 
         const dx = centerX - n.x;
         const dy = centerY - n.y;
-        n.vx += dx * 0.001;
-        n.vy += dy * 0.001;
+        n.vx += dx * 0.008;
+        n.vy += dy * 0.008;
 
         // Damping / friction
-        n.vx *= 0.85;
-        n.vy *= 0.85;
-
-        // Speed limit
-        const speed = Math.hypot(n.vx, n.vy);
-        if (speed > 8) {
-            n.vx = (n.vx / speed) * 8;
-            n.vy = (n.vy / speed) * 8;
-        }
+        n.vx *= 0.80;
+        n.vy *= 0.80;
 
         n.x += n.vx;
         n.y += n.vy;
