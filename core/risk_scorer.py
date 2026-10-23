@@ -1,7 +1,7 @@
 """
 CascadeSight - Risk Scorer Module
 Computes Cascade Risk Score (CRS) across all nodes to identify non-obvious,
-hidden critical single points of failure.
+hidden critical single points of failure (HSPOFs).
 """
 
 import networkx as nx
@@ -16,11 +16,15 @@ class CascadeRiskScorer:
         """
         Computes CRS for every node in the graph and ranks them.
         Formula:
-            CRS = (Blast Radius %)^2 / (100 * Degree Centrality)
-            
-        This quadratic scaling ensures that low-impact isolated nodes are not falsely 
-        flagged as high risk, while non-obvious nodes with moderate degree but massive 
-        downstream blast radius emerge as the top systemic hazards.
+            CRS(v) = (Blast Radius %(v))^2 / (100 * max(Total Degree(v), 1))
+            where Total Degree(v) = in_degree(v) + out_degree(v).
+
+        Characteristics & Limitations:
+            - Quadratic scaling penalizes catastrophic macro-failures (e.g. 80% collapse vs 20%).
+            - Dividing by total structural connectivity penalizes obvious high-degree hubs,
+              elevating low-degree structural bottlenecks (HSPOFs).
+            - Boundary behavior: An isolated node with degree 0 uses effective_degree=1.
+            - On star topologies, the hub still ranks highest if its blast radius dominates.
         """
         simulator = CascadeSimulator(self.graph, default_threshold=threshold)
         results = []
@@ -36,12 +40,12 @@ class CascadeRiskScorer:
             total_deg = in_deg + out_deg
             effective_deg = max(total_deg, 1)
             
-            # Refined Cascade Risk Score (CRS) Formula
+            # Cascade Risk Score (CRS) Formula
             raw_crs = (blast_radius_pct ** 2) / (100.0 * effective_deg)
             crs = round(raw_crs, 2)
             
-            # Is this a Hidden Critical Single Point of Failure?
-            # Criteria: Degree <= 8 AND Blast Radius >= 50%
+            # Hidden Critical Single Point of Failure (HSPOF) Criteria:
+            # Low-to-moderate total connectivity (<= 8) AND catastrophic blast radius (>= 50%)
             is_hidden_danger = (total_deg <= 8) and (blast_radius_pct >= 50.0)
 
             results.append({

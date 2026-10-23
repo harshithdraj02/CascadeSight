@@ -106,11 +106,11 @@
 >
 > Here is the spoken intuition behind it: **We take the total systemic damage percentage — what we call the Blast Radius — square it, and divide it by the node's direct connection count.**
 >
-> Why does squaring the damage matter? Because a busy API Gateway might have twelve connections and cause a forty percent impact, yielding a moderate risk score. 
+> Why does squaring the damage matter? Because a busy API Gateway might have twelve connections and cause a forty percent impact, yielding a moderate risk score.
 > 
-> But a quiet **Internal Configuration Service** might only have two or three direct connections, yet sits at a structural choke-point that triggers a ninety percent total ecosystem collapse. 
+> But a quiet **Internal Configuration Service** has only direct outbound dependencies, yet sits at a structural choke-point that triggers an eighty percent total ecosystem collapse across sixteen services.
 > 
-> Squaring the blast radius causes the risk score for that quiet server to skyrocket to **11.57**!
+> Squaring the blast radius heavily penalizes this catastrophic impact, causing its Cascade Risk Score to reach **9.14**!
 >
 > CascadeSight mathematically unmasks these **Hidden Single Points of Failure** before they strike."
 
@@ -123,10 +123,10 @@
 **Speaker 1:**
 > "To transform this mathematical insight into a practical engineering tool, we built a four-stage technical pipeline:
 >
-> 1. **Graph Structural Engine**: Uses NetworkX to ingest microservice topology schemas and build directed dependency networks.
-> 2. **Discrete-Time Cascade Simulator**: Implements threshold dynamics. A service collapses at timestep $t+1$ if the fraction of its failed upstream dependencies meets or exceeds a safety threshold.
-> 3. **Non-Linear Tipping Point Analyzer**: Sweeps threshold values across the network to identify the **Percolation Threshold** — the exact tipping point where minor degradation suddenly explodes into catastrophic collapse.
-> 4. **Meta Outage Validation Engine**: We reconstructed the documented network topology from Meta's official postmortem report to validate our risk engine against real-world ground truth.
+> 1. **Graph Structural Engine**: Uses NetworkX to represent microservice topology schemas as directed dependency networks.
+> 2. **Discrete-Time Cascade Simulator**: Implements threshold percolation. A service collapses at timestep $t+1$ if the fraction of its failed upstream dependencies meets or exceeds its tolerance threshold.
+> 3. **Non-Linear Tipping Point Analyzer**: Sweeps threshold values across the network to identify the **Percolation Threshold** — the critical tipping point where minor resilience degradation triggers systemic breakdown.
+> 4. **Meta Outage Post-Mortem Modeling**: We formalized the documented failure chain from Meta's official post-mortem report into our dependency graph to demonstrate how threshold percolation captures multi-tier lockout loops.
 >
 > Let us show you CascadeSight running live on our system."
 
@@ -141,30 +141,30 @@
 >
 > On the right side, look at our risk leaderboards. Standard tools would claim that `API Gateway` is our most critical node because of its high degree of connections.
 >
-> But look at CascadeSight's CRS Leaderboard: **`Internal Config Service` is ranked Number 1 with a Cascade Risk Score of 11.57**, flagged with our bright *Hidden Single Point of Failure* indicator."
+> But look at CascadeSight's CRS Leaderboard: **`Internal Config Service` is ranked Number 1 with a Cascade Risk Score of 9.14**, flagged with our *Hidden Single Point of Failure* indicator."
 
 **Speaker 2 (Actions on Laptop):**
 *(Selects `Internal Config Service` on the graph canvas, sets threshold to 0.40, clicks **'Fail Selected Node & Run Cascade'**)*
 
 **Speaker 1 (Narrating live):**
 > "Speaker 2 has just triggered a simulated failure on `Internal Config Service`. Watch the step-by-step collapse across the canvas:
-> - **Timestep 1**: `Auth Service`, `API Gateway`, and `User DB` turn red.
-> - **Timestep 2**: Dependent payment engines and data pipelines turn yellow, then collapse.
-> - **Timestep 3**: Background workers, logging services, and monitoring agents fail.
+> - **Timestep 1**: Core platform databases, caches, auth, and payment gateways lose their upstream configuration.
+> - **Timestep 2**: Downstream API gateways, job workers, search indexers, and analytics engines collapse.
+> - **Timestep 3**: Customer web portals and mobile client endpoints fail.
 >
-> **The result**: System Health plummets from 100% down to 10% — a **90% Blast Radius** across eighteen nodes in just three steps!
+> **The result**: System Health plummets from 100% down to 20% — an **80.0% Blast Radius** across sixteen nodes in three discrete steps.
 >
-> At the bottom right of the screen, our **Tipping Point Curve** shows how system health stays stable until threshold point 0.40, and then drops vertically. That vertical cliff is the percolation threshold — the point of no return."
+> At the bottom right of the screen, our **Tipping Point Curve** models system sensitivity as threshold varies, highlighting the steep cliff where structural failure accelerates."
 
 **Speaker 2 (Actions on Laptop):**
 *(Clicks the **'Meta Oct 2021 Case Study'** preset button)*
 
 **Speaker 2 (Speaking directly to judges while pointing at screen):**
-> "We went a step further. We loaded the reconstructed network topology from Meta's official October 2021 postmortem report into CascadeSight.
+> "We also evaluated an explanatory post-mortem model of Meta's October 2021 global blackout.
 >
-> Without providing the engine any historical hint, CascadeSight scored every single node. As shown right here on our screen: **`Backbone BGP Router Config` was calculated as the Number 1 highest Cascade Risk node!**
+> By formalizing the public post-mortem incident report into a directed dependency model, CascadeSight identifies **`Backbone BGP Router Config` as the Number 1 highest Cascade Risk node** with a 100% blast radius.
 >
-> CascadeSight mathematically proves that if Meta had run this risk model prior to October 4th, that BGP configuration would have been flagged as their single greatest systemic liability."
+> This demonstrates how modeling dependency topology before deployment can expose critical choke-points that lead to multi-tier cascading paralysis."
 
 ---
 

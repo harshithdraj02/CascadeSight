@@ -1,6 +1,7 @@
 """
 CascadeSight - Cascade Simulator Module
 Simulates discrete-time threshold cascade propagation across directed dependency graphs.
+Guarantees full equilibrium termination without arbitrary timestep truncation.
 """
 
 import networkx as nx
@@ -14,29 +15,54 @@ class CascadeSimulator:
     def simulate_cascade(self, initial_failed_nodes: List[str], threshold: float = None) -> Dict[str, Any]:
         """
         Runs a discrete-time cascade simulation starting from initial_failed_nodes.
-        Returns detailed step-by-step collapse trace and causality.
+        Terminates dynamically when the system reaches operational equilibrium
+        (no newly failed nodes in a timestep), supporting arbitrary graph depth.
         """
         th = threshold if threshold is not None else self.default_threshold
-        
-        # State tracking
-        failed_set: Set[str] = set(initial_failed_nodes)
-        failure_timesteps: Dict[str, int] = {node: 0 for node in initial_failed_nodes}
-        causality_triggers: Dict[str, List[str]] = {node: ["INITIAL_FAILURE"] for node in initial_failed_nodes}
+        total_nodes = self.graph.number_of_nodes()
+
+        # Handle edge case: empty graph
+        if total_nodes == 0:
+            return {
+                "initialFailed": initial_failed_nodes,
+                "thresholdUsed": th,
+                "totalTimesteps": 0,
+                "totalFailedNodes": 0,
+                "totalNodes": 0,
+                "blastRadiusPercentage": 0.0,
+                "survivedNodesCount": 0,
+                "failureTimesteps": {},
+                "causalityTriggers": {},
+                "stepHistory": [],
+                "failedNodesList": [],
+                "equilibriumReached": True,
+                "simulationHaltedEarly": False
+            }
+
+        # Filter initial failed nodes to those actually present in graph
+        valid_initial = [node for node in initial_failed_nodes if node in self.graph]
+        failed_set: Set[str] = set(valid_initial)
+        failure_timesteps: Dict[str, int] = {node: 0 for node in valid_initial}
+        causality_triggers: Dict[str, List[str]] = {node: ["INITIAL_FAILURE"] for node in valid_initial}
         
         history: List[Dict[str, Any]] = []
         
         # Record Initial State (t=0)
         history.append({
             "timestep": 0,
-            "newlyFailed": list(initial_failed_nodes),
+            "newlyFailed": list(valid_initial),
             "totalFailedCount": len(failed_set),
-            "systemHealthPercentage": round((1.0 - (len(failed_set) / self.graph.number_of_nodes())) * 100, 2)
+            "systemHealthPercentage": round((1.0 - (len(failed_set) / total_nodes)) * 100.0, 2)
         })
 
         timestep = 1
-        max_timesteps = 50  # prevent infinite loops
+        # Safety bound: In a graph of N nodes with monotonic failure (nodes never un-fail),
+        # each non-equilibrium step must fail at least 1 node. Maximum possible steps is N.
+        max_possible_timesteps = max(total_nodes, 1)
+        equilibrium_reached = False
+        simulation_halted_early = False
         
-        while timestep <= max_timesteps:
+        while timestep <= max_possible_timesteps:
             newly_failed_in_step: Set[str] = set()
             step_causality: Dict[str, List[str]] = {}
 
@@ -55,13 +81,14 @@ class CascadeSimulator:
                 failed_upstream = [dep for dep in upstream_deps if dep in failed_set]
                 failed_ratio = len(failed_upstream) / len(upstream_deps)
                 
-                # If failed ratio meets or exceeds threshold, this node collapses at this step!
+                # If failed ratio meets or exceeds threshold, this node collapses at this step
                 if failed_ratio >= th:
                     newly_failed_in_step.add(node)
                     step_causality[node] = failed_upstream
 
             if not newly_failed_in_step:
                 # Equilibrium reached! No more nodes failing.
+                equilibrium_reached = True
                 break
 
             for node in newly_failed_in_step:
@@ -73,17 +100,20 @@ class CascadeSimulator:
                 "timestep": timestep,
                 "newlyFailed": list(newly_failed_in_step),
                 "totalFailedCount": len(failed_set),
-                "systemHealthPercentage": round((1.0 - (len(failed_set) / self.graph.number_of_nodes())) * 100, 2)
+                "systemHealthPercentage": round((1.0 - (len(failed_set) / total_nodes)) * 100.0, 2)
             })
 
             timestep += 1
+        else:
+            # Loop ended without break
+            equilibrium_reached = len(failed_set) == total_nodes
+            simulation_halted_early = not equilibrium_reached
 
-        total_nodes = self.graph.number_of_nodes()
         total_failed = len(failed_set)
-        blast_radius_pct = round((total_failed / total_nodes) * 100, 2)
+        blast_radius_pct = round((total_failed / total_nodes) * 100.0, 2)
 
         return {
-            "initialFailed": initial_failed_nodes,
+            "initialFailed": valid_initial,
             "thresholdUsed": th,
             "totalTimesteps": len(history) - 1,
             "totalFailedNodes": total_failed,
@@ -93,5 +123,7 @@ class CascadeSimulator:
             "failureTimesteps": failure_timesteps,
             "causalityTriggers": causality_triggers,
             "stepHistory": history,
-            "failedNodesList": list(failed_set)
+            "failedNodesList": list(failed_set),
+            "equilibriumReached": equilibrium_reached,
+            "simulationHaltedEarly": simulation_halted_early
         }
