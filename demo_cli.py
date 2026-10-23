@@ -6,6 +6,14 @@ tipping point analysis, and Meta case study validation.
 
 import sys
 import time
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from core.graph_engine import DependencyGraphEngine
 from core.cascade_model import CascadeSimulator
 from core.risk_scorer import CascadeRiskScorer
@@ -59,7 +67,13 @@ def run_synthetic_demo():
     tp_res = analyzer.analyze_threshold_sensitivity([top_node])
     
     print(f"Trigger Node: [{top_node}]")
-    print(f"Identified Percolation Tipping Point: Threshold = {tp_res['tippingPointThreshold']:.2f}")
+    if tp_res.get('tippingPointDetected') and tp_res.get('tippingPointThreshold') is not None:
+        tp_th = tp_res['tippingPointThreshold']
+        print(f"Identified Percolation Tipping Point: Threshold = {tp_th:.2f}")
+    else:
+        tp_th = None
+        print("Percolation Sensitivity: Stable curve (no single sharp phase cliff detected)")
+
     print("\n--- NON-LINEAR DEGRADATION CURVE ---")
     print(f"{'Threshold (θ)':<15} | {'Collapse %':<12} | {'Visual Bar'}")
     print("-" * 50)
@@ -67,18 +81,19 @@ def run_synthetic_demo():
         th_val = pt["threshold"]
         coll = pt["systemCollapsePercentage"]
         bar = "█" * int(coll / 5)
-        marker = " 👈 TIPPING POINT" if abs(th_val - tp_res["tippingPointThreshold"]) < 0.01 else ""
+        marker = " 👈 TIPPING POINT" if (tp_th is not None and abs(th_val - tp_th) < 0.01) else ""
         print(f"θ = {th_val:<11.2f} | {coll:>5.1f}%      | {bar}{marker}")
 
 def run_meta_case_study():
     print_header("Case Study: Meta (Facebook) Outage — Oct 4, 2021")
     cs = MetaOct2021CaseStudy()
-    res = cs.run_validation()
+    res = cs.run_post_mortem_analysis()
     
     print(f"Case Study: {res['caseStudyName']}")
-    print(f"Historical Origin Node: [{res['historicalOriginNode']}]")
+    print(f"Incident Origin Node  : [{res['incidentOriginNode']}]")
     print(f"Top CRS Scoring Node  : [{res['topScoringNode']}]")
-    print(f"Validation Result     : {'✅ MATCHES HISTORICAL GROUND TRUTH' if res['matchesHistoricalTruth'] else '❌ MISMATCH'}")
+    print(f"Model Outcome         : {'[MATCH] Incident Root Ranks #1 in Post-Mortem Model' if res['originRanksFirst'] else '[MISMATCH]'}")
+    print(f"Methodology Note      : {res['methodologyNote']}")
     
     print("\n--- META GRAPH RANKINGS ---")
     for r, item in enumerate(res["rankedRiskScores"][:5], 1):

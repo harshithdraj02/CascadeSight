@@ -6,7 +6,15 @@ live cascade simulation, risk leaderboards, and tipping point analysis.
 
 from flask import Flask, jsonify, request, send_from_directory
 import os
+import sys
 import networkx as nx
+
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 from core.graph_engine import DependencyGraphEngine
 from core.cascade_model import CascadeSimulator
@@ -78,7 +86,7 @@ def health_check():
 @app.route('/api/case-study', methods=['GET'])
 def get_case_study():
     cs = MetaOct2021CaseStudy()
-    return jsonify(cs.run_validation())
+    return jsonify(cs.run_post_mortem_analysis())
 
 def open_browser(port):
     try:
@@ -89,8 +97,8 @@ def open_browser(port):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     print(f"\n========================================================")
-    print(f"🚀 CascadeSight Web Dashboard Server Started!")
-    print(f"🌐 Access Dashboard locally at: http://localhost:{port}")
+    print(f"[+] CascadeSight Web Dashboard Server Started!")
+    print(f"[+] Access Dashboard locally at: http://localhost:{port}")
     print(f"========================================================\n")
     
     # Auto-open browser in non-reloader thread
