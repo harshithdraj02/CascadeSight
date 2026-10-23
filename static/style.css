@@ -226,12 +226,13 @@ body {
 .canvas-container {
     position: relative;
     width: 100%;
-    height: 520px;
+    height: 560px;
     background: rgba(7, 10, 19, 0.95);
     border-radius: 12px;
     border: 1px solid var(--border-color);
     overflow: hidden;
     cursor: grab;
+    user-select: none;
 }
 
 .canvas-container:active {
@@ -242,6 +243,55 @@ canvas#graphCanvas {
     width: 100%;
     height: 100%;
     display: block;
+}
+
+.canvas-zoom-controls {
+    position: absolute;
+    bottom: 14px;
+    right: 14px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(15, 23, 42, 0.88);
+    border: 1px solid var(--border-color);
+    padding: 6px 10px;
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+    z-index: 10;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.btn-zoom {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #e2e8f0;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.btn-zoom:hover {
+    background: rgba(59, 130, 246, 0.4);
+    border-color: var(--primary);
+    color: #fff;
+    transform: translateY(-1px);
+}
+
+.btn-zoom:active {
+    transform: translateY(0);
+}
+
+.zoom-badge {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    padding: 0 4px;
+    min-width: 40px;
+    text-align: center;
+    font-weight: 600;
 }
 
 .canvas-overlay {

@@ -11,12 +11,18 @@ let playbackTimer = null;
 let isPlaying = false;
 let riskScoresMap = {};
 
-// Canvas & Physics Engine
+// Canvas, Zoom, Pan & Physics Engine
 let canvas = null;
 let ctx = null;
-let nodePositions = {}; // id -> {x, y, vx, vy, radius, state, label, category, degree}
-let isDragging = false;
+let nodePositions = {}; // id -> {x, y, vx, vy, baseX, baseY, radius, state, label, category, degree}
+let isDraggingNode = false;
 let draggedNode = null;
+let isPanning = false;
+let lastMouseX = 0;
+let lastMouseY = 0;
+let zoom = 1.0;
+let panX = 0;
+let panY = 0;
 let hoveredNode = null;
 let particleOffset = 0;
 
@@ -30,11 +36,12 @@ document.addEventListener('DOMContentLoaded', () => {
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
-    // Canvas Mouse & Touch Events
+    // Canvas Mouse, Wheel & Pan Events
     canvas.addEventListener('mousedown', handleMouseDown);
     canvas.addEventListener('mousemove', handleMouseMove);
     canvas.addEventListener('mouseup', handleMouseUp);
     canvas.addEventListener('mouseleave', handleMouseUp);
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
 
     // Physics & Particle Animation Loop
     requestAnimationFrame(animationLoop);
@@ -57,8 +64,98 @@ function resizeCanvas() {
     canvas.width = rect.width;
     canvas.height = rect.height;
     if (graphData.nodes && graphData.nodes.length > 0) {
-        setupNodePositions();
+        fitGraphToView();
     }
+}
+
+// Coordinate conversions for Zoom & Pan
+function screenToWorld(sx, sy) {
+    return {
+        x: (sx - panX) / zoom,
+        y: (sy - panY) / zoom
+    };
+}
+
+function worldToScreen(wx, wy) {
+    return {
+        x: wx * zoom + panX,
+        y: wy * zoom + panY
+    };
+}
+
+function handleWheel(e) {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+    const newZoom = Math.max(0.25, Math.min(3.5, zoom * zoomFactor));
+
+    // Zoom centered at cursor
+    panX = mouseX - (mouseX - panX) * (newZoom / zoom);
+    panY = mouseY - (mouseY - panY) * (newZoom / zoom);
+    zoom = newZoom;
+
+    updateZoomBadge();
+}
+
+function zoomIn() {
+    if (!canvas) return;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const newZoom = Math.min(3.5, zoom * 1.25);
+    panX = cx - (cx - panX) * (newZoom / zoom);
+    panY = cy - (cy - panY) * (newZoom / zoom);
+    zoom = newZoom;
+    updateZoomBadge();
+}
+
+function zoomOut() {
+    if (!canvas) return;
+    const cx = canvas.width / 2;
+    const cy = canvas.height / 2;
+    const newZoom = Math.max(0.25, zoom * 0.8);
+    panX = cx - (cx - panX) * (newZoom / zoom);
+    panY = cy - (cy - panY) * (newZoom / zoom);
+    zoom = newZoom;
+    updateZoomBadge();
+}
+
+function updateZoomBadge() {
+    const badge = document.getElementById('zoom-badge');
+    if (badge) {
+        badge.innerText = `${Math.round(zoom * 100)}%`;
+    }
+}
+
+function fitGraphToView() {
+    const nodes = Object.values(nodePositions);
+    if (nodes.length === 0 || !canvas) return;
+
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    nodes.forEach(n => {
+        minX = Math.min(minX, n.x - n.radius - 75);
+        maxX = Math.max(maxX, n.x + n.radius + 75);
+        minY = Math.min(minY, n.y - n.radius - 35);
+        maxY = Math.max(maxY, n.y + n.radius + 45);
+    });
+
+    const graphW = Math.max(100, maxX - minX);
+    const graphH = Math.max(100, maxY - minY);
+    const canvasW = canvas.width || 800;
+    const canvasH = canvas.height || 560;
+
+    const scaleX = (canvasW * 0.88) / graphW;
+    const scaleY = (canvasH * 0.88) / graphH;
+    zoom = Math.max(0.35, Math.min(1.25, Math.min(scaleX, scaleY)));
+
+    const graphCenterX = (minX + maxX) / 2;
+    const graphCenterY = (minY + maxY) / 2;
+    panX = (canvasW / 2) - (graphCenterX * zoom);
+    panY = (canvasH / 2) - (graphCenterY * zoom);
+
+    updateZoomBadge();
 }
 
 async function initDashboard() {
@@ -105,33 +202,109 @@ async function loadGraph(mode) {
     }
 }
 
+// Enterprise Tiered Topological Layout Generator
 function setupNodePositions() {
-    const width = canvas.width || 800;
-    const height = canvas.height || 520;
-    const centerX = width / 2;
-    const centerY = height / 2;
     const numNodes = graphData.nodes.length;
-    const radius = Math.min(width, height) * 0.36;
+    if (numNodes === 0) return;
+
+    // 1. Build adjacency and calculate in/out degrees
+    const inDegree = {};
+    const adj = {};
+    graphData.nodes.forEach(n => {
+        inDegree[n.id] = 0;
+        adj[n.id] = [];
+    });
+
+    graphData.edges.forEach(e => {
+        if (adj[e.source]) adj[e.source].push(e.target);
+        if (inDegree[e.target] !== undefined) inDegree[e.target]++;
+    });
+
+    // 2. Compute depth for each node (topological layer)
+    const depths = {};
+    const queue = [];
+
+    // Root nodes (inDegree 0)
+    graphData.nodes.forEach(n => {
+        if (inDegree[n.id] === 0) {
+            depths[n.id] = 0;
+            queue.push(n.id);
+        }
+    });
+
+    if (queue.length === 0 && graphData.nodes.length > 0) {
+        depths[graphData.nodes[0].id] = 0;
+        queue.push(graphData.nodes[0].id);
+    }
+
+    let safety = 0;
+    while (queue.length > 0 && safety < numNodes * 5) {
+        safety++;
+        const u = queue.shift();
+        const curD = depths[u] || 0;
+        (adj[u] || []).forEach(v => {
+            const nextD = curD + 1;
+            if (depths[v] === undefined || depths[v] < nextD) {
+                depths[v] = nextD;
+                queue.push(v);
+            }
+        });
+    }
+
+    graphData.nodes.forEach(n => {
+        if (depths[n.id] === undefined) depths[n.id] = 0;
+    });
+
+    // 3. Group nodes by depth layers
+    const layers = {};
+    graphData.nodes.forEach(node => {
+        const d = depths[node.id] || 0;
+        if (!layers[d]) layers[d] = [];
+        layers[d].push(node);
+    });
+
+    const layerKeys = Object.keys(layers).map(Number).sort((a, b) => a - b);
+    const canvasWidth = canvas ? (canvas.width || 850) : 850;
+    const centerX = canvasWidth / 2;
+
+    const layerSpacingY = 130;
+    const nodeSpacingX = 180;
+    const startY = 80;
 
     nodePositions = {};
 
-    graphData.nodes.forEach((node, i) => {
-        const angle = (i / numNodes) * 2 * Math.PI;
-        nodePositions[node.id] = {
-            id: node.id,
-            label: node.label || node.id,
-            category: node.category || 'default',
-            x: centerX + radius * Math.cos(angle) + (Math.random() - 0.5) * 20,
-            y: centerY + radius * Math.sin(angle) + (Math.random() - 0.5) * 20,
-            vx: 0,
-            vy: 0,
-            radius: Math.max(14, 12 + (node.degree || 1) * 1.6),
-            state: 'healthy', // 'healthy', 'at-risk', 'failed'
-            inDegree: node.inDegree,
-            outDegree: node.outDegree,
-            degree: node.degree
-        };
+    layerKeys.forEach((d, layerIdx) => {
+        const layerNodes = layers[d];
+        const count = layerNodes.length;
+        const totalW = (count - 1) * nodeSpacingX;
+        const startX = centerX - (totalW / 2);
+
+        layerNodes.forEach((node, colIdx) => {
+            const posX = count === 1 ? centerX : (startX + colIdx * nodeSpacingX);
+            const posY = startY + layerIdx * layerSpacingY;
+
+            nodePositions[node.id] = {
+                id: node.id,
+                label: node.label || node.id,
+                category: node.category || 'default',
+                x: posX,
+                y: posY,
+                baseX: posX,
+                baseY: posY,
+                vx: 0,
+                vy: 0,
+                radius: Math.max(14, 12 + (node.degree || 1) * 1.5),
+                state: 'healthy',
+                inDegree: node.inDegree || 0,
+                outDegree: node.outDegree || 0,
+                degree: node.degree || 0,
+                depth: d
+            };
+        });
     });
+
+    // Auto-fit view nicely with comfortable margins
+    fitGraphToView();
 }
 
 // Animation & Physics Loop
@@ -146,12 +319,7 @@ function applyForcePhysics() {
     const nodes = Object.values(nodePositions);
     if (nodes.length === 0) return;
 
-    const width = canvas.width || 800;
-    const height = canvas.height || 520;
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    // Node-to-node separation & collision avoidance
+    // Node-to-node collision avoidance (push apart if overlapping)
     for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
             const n1 = nodes[i];
@@ -159,15 +327,10 @@ function applyForcePhysics() {
             const dx = n2.x - n1.x;
             const dy = n2.y - n1.y;
             const dist = Math.hypot(dx, dy) || 1;
+            const minDist = n1.radius + n2.radius + 45;
 
-            if (dist < 260) {
-                const minDist = n1.radius + n2.radius + 36;
-                let force = 0;
-                if (dist < minDist) {
-                    force = (minDist - dist) / dist * 0.35;
-                } else {
-                    force = ((260 - dist) / 260) * 0.04;
-                }
+            if (dist < minDist) {
+                const force = (minDist - dist) / dist * 0.35;
                 n1.vx -= dx * force;
                 n1.vy -= dy * force;
                 n2.vx += dx * force;
@@ -176,56 +339,69 @@ function applyForcePhysics() {
         }
     }
 
-    // Spring attraction along edges (Hooke's law)
-    const targetDist = 120;
-    graphData.edges.forEach(edge => {
-        const src = nodePositions[edge.source];
-        const tgt = nodePositions[edge.target];
-        if (!src || !tgt) return;
-
-        const dx = tgt.x - src.x;
-        const dy = tgt.y - src.y;
-        const dist = Math.hypot(dx, dy) || 1;
-        const force = (dist - targetDist) * 0.008;
-
-        const fx = (dx / dist) * force;
-        const fy = (dy / dist) * force;
-
-        src.vx += fx;
-        src.vy += fy;
-        tgt.vx -= fx;
-        tgt.vy -= dy * force;
-    });
-
-    // Centering gravity & position update
+    // Soft spring anchor to maintain clean tiered architectural structure
     nodes.forEach(n => {
-        if (n === draggedNode) return; // User is dragging this node
+        if (n === draggedNode) return;
 
-        const dx = centerX - n.x;
-        const dy = centerY - n.y;
-        n.vx += dx * 0.008;
-        n.vy += dy * 0.008;
+        n.vx += (n.baseX - n.x) * 0.02;
+        n.vy += (n.baseY - n.y) * 0.02;
 
-        // Damping / friction
-        n.vx *= 0.80;
-        n.vy *= 0.80;
+        // Damping
+        n.vx *= 0.75;
+        n.vy *= 0.75;
 
         n.x += n.vx;
         n.y += n.vy;
-
-        // Boundary padding: keep nodes and labels comfortably within canvas
-        const padX = Math.max(n.radius + 15, 65);
-        const padY = n.radius + 28;
-        n.x = Math.max(padX, Math.min(width - padX, n.x));
-        n.y = Math.max(padY, Math.min(height - padY, n.y));
     });
+}
+
+function roundRect(context, x, y, width, height, radius, fill, stroke) {
+    context.beginPath();
+    context.moveTo(x + radius, y);
+    context.lineTo(x + width - radius, y);
+    context.quadraticCurveTo(x + width, y, x + width, y + radius);
+    context.lineTo(x + width, y + height - radius);
+    context.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    context.lineTo(x + radius, y + height);
+    context.quadraticCurveTo(x, y + height, x, y + height - radius);
+    context.lineTo(x, y + radius);
+    context.quadraticCurveTo(x, y, x + radius, y);
+    context.closePath();
+    if (fill) context.fill();
+    if (stroke) context.stroke();
+}
+
+function drawGrid(context, width, height, px, py, z) {
+    context.fillStyle = '#070a13';
+    context.fillRect(0, 0, width, height);
+
+    const gridSize = 28 * z;
+    if (gridSize > 8) {
+        const startX = (px % gridSize + gridSize) % gridSize;
+        const startY = (py % gridSize + gridSize) % gridSize;
+        context.fillStyle = 'rgba(255, 255, 255, 0.04)';
+        for (let x = startX; x < width; x += gridSize) {
+            for (let y = startY; y < height; y += gridSize) {
+                context.fillRect(x, y, 1.2, 1.2);
+            }
+        }
+    }
 }
 
 function drawGraph() {
     if (!ctx || !canvas) return;
+
+    ctx.save();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Draw Edges (Directed Arrows & Particles)
+    // Subtle responsive dot grid
+    drawGrid(ctx, canvas.width, canvas.height, panX, panY, zoom);
+
+    // Apply Zoom & Pan Camera Transformation
+    ctx.translate(panX, panY);
+    ctx.scale(zoom, zoom);
+
+    // 1. Draw Edges
     graphData.edges.forEach(edge => {
         const src = nodePositions[edge.source];
         const tgt = nodePositions[edge.target];
@@ -239,13 +415,13 @@ function drawGraph() {
         let lineWidth = 1.2;
 
         if (src.state === 'failed' && tgt.state === 'failed') {
-            strokeColor = 'rgba(239, 68, 68, 0.7)';
-            lineWidth = 2.5;
+            strokeColor = 'rgba(239, 68, 68, 0.75)';
+            lineWidth = 2.4;
         } else if (src.state === 'failed') {
-            strokeColor = 'rgba(245, 158, 11, 0.6)';
+            strokeColor = 'rgba(245, 158, 11, 0.65)';
             lineWidth = 2.0;
         } else if (src.id === hoveredNode || tgt.id === hoveredNode) {
-            strokeColor = 'rgba(96, 165, 250, 0.6)';
+            strokeColor = 'rgba(96, 165, 250, 0.65)';
             lineWidth = 2.0;
         }
 
@@ -256,25 +432,25 @@ function drawGraph() {
         // Draw Arrowhead
         drawArrowHead(src, tgt, strokeColor);
 
-        // Particle Pulses on Active Edges
+        // Particle Pulses on Active Failure Edges
         if (src.state === 'failed') {
             drawEdgeParticle(src, tgt, 'rgba(239, 68, 68, 0.9)');
         }
     });
 
-    // Draw Nodes
+    // 2. Draw Nodes & Crisp Label Badges
     Object.values(nodePositions).forEach(node => {
         ctx.beginPath();
         ctx.arc(node.x, node.y, node.radius, 0, 2 * Math.PI);
 
-        let fillColor = '#10b981'; // Green
+        let fillColor = '#10b981'; // Green (Healthy)
         let glowColor = 'rgba(16, 185, 129, 0.4)';
 
         if (node.state === 'failed') {
             fillColor = '#ef4444'; // Red
             glowColor = 'rgba(239, 68, 68, 0.85)';
         } else if (node.state === 'at-risk') {
-            fillColor = '#f59e0b'; // Yellow
+            fillColor = '#f59e0b'; // Amber
             glowColor = 'rgba(245, 158, 11, 0.7)';
         }
 
@@ -286,18 +462,33 @@ function drawGraph() {
         ctx.shadowColor = glowColor;
         ctx.shadowBlur = (node.id === selectedNode || node.state === 'failed') ? 18 : 10;
         ctx.fill();
-        ctx.shadowBlur = 0; // reset
+        ctx.shadowBlur = 0; // reset shadow
 
-        ctx.strokeStyle = (node.id === selectedNode) ? '#ffffff' : (node.id === hoveredNode ? '#60a5fa' : 'rgba(255, 255, 255, 0.25)');
+        ctx.strokeStyle = (node.id === selectedNode) ? '#ffffff' : (node.id === hoveredNode ? '#60a5fa' : 'rgba(255, 255, 255, 0.28)');
         ctx.lineWidth = (node.id === selectedNode) ? 3.5 : (node.id === hoveredNode ? 2.5 : 1.5);
         ctx.stroke();
 
-        // Node Label
-        ctx.fillStyle = (node.id === selectedNode) ? '#ffffff' : '#e2e8f0';
+        // 3. Crisp Frosted Label Badge
+        const text = node.label;
         ctx.font = (node.id === selectedNode) ? '600 12px Inter, sans-serif' : '500 11px Inter, sans-serif';
+        const textMetrics = ctx.measureText(text);
+        const pillW = textMetrics.width + 12;
+        const pillH = 19;
+        const pillX = node.x - pillW / 2;
+        const pillY = node.y + node.radius + 7;
+
+        ctx.fillStyle = (node.id === selectedNode) ? 'rgba(30, 58, 138, 0.92)' : (node.state === 'failed' ? 'rgba(80, 15, 15, 0.90)' : 'rgba(15, 23, 42, 0.90)');
+        ctx.strokeStyle = (node.id === selectedNode) ? 'rgba(96, 165, 250, 0.8)' : (node.state === 'failed' ? 'rgba(239, 68, 68, 0.5)' : 'rgba(255, 255, 255, 0.14)');
+        ctx.lineWidth = 1;
+        roundRect(ctx, pillX, pillY, pillW, pillH, 4, true, true);
+
+        ctx.fillStyle = (node.id === selectedNode || node.state === 'failed') ? '#ffffff' : '#e2e8f0';
         ctx.textAlign = 'center';
-        ctx.fillText(node.label, node.x, node.y + node.radius + 15);
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, node.x, pillY + pillH / 2);
     });
+
+    ctx.restore();
 }
 
 function drawArrowHead(src, tgt, color) {
@@ -333,55 +524,77 @@ function drawEdgeParticle(src, tgt, color) {
     ctx.shadowBlur = 0;
 }
 
-// Mouse Event Handlers
-function getNodeAtPosition(x, y) {
+// Mouse Event Handlers with Zoom & Pan awareness
+function getNodeAtPosition(screenX, screenY) {
+    const world = screenToWorld(screenX, screenY);
     for (let node of Object.values(nodePositions)) {
-        const dist = Math.hypot(x - node.x, y - node.y);
-        if (dist <= node.radius + 6) return node;
+        const dist = Math.hypot(world.x - node.x, world.y - node.y);
+        if (dist <= node.radius + 8) return node;
     }
     return null;
 }
 
 function handleMouseDown(e) {
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    lastMouseX = sx;
+    lastMouseY = sy;
 
-    const clicked = getNodeAtPosition(x, y);
+    const clicked = getNodeAtPosition(sx, sy);
     if (clicked) {
-        isDragging = true;
+        isDraggingNode = true;
         draggedNode = clicked;
         selectedNode = clicked.id;
         document.getElementById('lbl-selected-node').innerText = selectedNode;
         loadTippingPoint();
         updateNodeInspector(clicked);
+    } else {
+        isPanning = true;
+        if (canvas) canvas.style.cursor = 'grabbing';
     }
 }
 
 function handleMouseMove(e) {
     const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    const dx = sx - lastMouseX;
+    const dy = sy - lastMouseY;
+    lastMouseX = sx;
+    lastMouseY = sy;
 
-    if (isDragging && draggedNode) {
-        draggedNode.x = x;
-        draggedNode.y = y;
+    if (isDraggingNode && draggedNode) {
+        const world = screenToWorld(sx, sy);
+        draggedNode.x = world.x;
+        draggedNode.y = world.y;
+        draggedNode.baseX = world.x;
+        draggedNode.baseY = world.y;
         draggedNode.vx = 0;
         draggedNode.vy = 0;
+    } else if (isPanning) {
+        panX += dx;
+        panY += dy;
     } else {
-        const hovered = getNodeAtPosition(x, y);
-        if (hovered !== hoveredNode) {
-            hoveredNode = hovered ? hovered.id : null;
-            if (hovered) {
+        const hovered = getNodeAtPosition(sx, sy);
+        if (hovered) {
+            if (canvas) canvas.style.cursor = 'pointer';
+            if (hovered.id !== hoveredNode) {
+                hoveredNode = hovered.id;
                 updateNodeInspector(hovered);
             }
+        } else {
+            if (canvas) canvas.style.cursor = 'grab';
+            hoveredNode = null;
         }
     }
 }
 
 function handleMouseUp() {
-    isDragging = false;
+    isDraggingNode = false;
     draggedNode = null;
+    isPanning = false;
+    if (canvas) canvas.style.cursor = 'grab';
 }
 
 function updateNodeInspector(node) {

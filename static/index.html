@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="style.css?v=2.2">
+    <link rel="stylesheet" href="style.css?v=2.3">
 </head>
 <body>
     <div class="app-container">
@@ -85,6 +85,14 @@
                             <span class="lbl">Selected Trigger:</span>
                             <span id="lbl-selected-node" class="val highlight">Internal Config Service</span>
                         </div>
+                    </div>
+
+                    <!-- Floating Zoom & Canvas Controls -->
+                    <div class="canvas-zoom-controls">
+                        <button class="btn-zoom" title="Zoom In" onclick="zoomIn()">➕</button>
+                        <button class="btn-zoom" title="Zoom Out" onclick="zoomOut()">➖</button>
+                        <button class="btn-zoom" title="Fit Entire Graph" onclick="fitGraphToView()">⟲ Fit</button>
+                        <span id="zoom-badge" class="zoom-badge">100%</span>
                     </div>
 
                     <!-- Floating Node Inspector Tooltip -->
@@ -286,6 +294,6 @@
         </div>
     </div>
 
-    <script src="app.js?v=2.2"></script>
+    <script src="app.js?v=2.3"></script>
 </body>
 </html>
