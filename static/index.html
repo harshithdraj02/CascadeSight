@@ -237,7 +237,7 @@
     </div>
 
     <!-- Modal: Architecture Import -->
-    <div id="modal-import" class="modal-overlay hidden">
+    <div id="modal-import" class="modal-overlay hidden" onclick="if(event.target === this) closeImportModal()">
         <div class="modal-card">
             <div class="modal-header">
                 <h3>📥 Ingest Live Infrastructure Manifest</h3>
@@ -267,7 +267,7 @@
     </div>
 
     <!-- Modal: SRE Resilience Audit Report -->
-    <div id="modal-audit" class="modal-overlay hidden">
+    <div id="modal-audit" class="modal-overlay hidden" onclick="if(event.target === this) closeAuditModal()">
         <div class="modal-card modal-large">
             <div class="modal-header">
                 <div>

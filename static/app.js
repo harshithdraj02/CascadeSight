@@ -39,6 +39,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Physics & Particle Animation Loop
     requestAnimationFrame(animationLoop);
 
+    // Keyboard shortcuts (Escape closes modals)
+    window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            closeImportModal();
+            closeAuditModal();
+        }
+    });
+
     // Initial Dashboard Load
     initDashboard();
 });
