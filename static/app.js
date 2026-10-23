@@ -151,27 +151,32 @@ function applyForcePhysics() {
     const centerX = width / 2;
     const centerY = height / 2;
 
-    // Repulsion between nodes
+    // Repulsion between all pairs of nodes (Coulomb electrostatic force)
+    const kRepulsion = 5500;
     for (let i = 0; i < nodes.length; i++) {
         for (let j = i + 1; j < nodes.length; j++) {
             const n1 = nodes[i];
             const n2 = nodes[j];
             const dx = n2.x - n1.x;
             const dy = n2.y - n1.y;
-            const dist = Math.hypot(dx, dy) || 1;
-            const minDist = (n1.radius + n2.radius) * 2.2;
+            const distSq = dx * dx + dy * dy;
+            const dist = Math.sqrt(distSq) || 1;
 
-            if (dist < minDist) {
-                const force = (minDist - dist) / dist * 0.05;
-                n1.vx -= dx * force;
-                n1.vy -= dy * force;
-                n2.vx += dx * force;
-                n2.vy += dy * force;
-            }
+            // Coulomb repulsion with soft minimum to prevent instability
+            const force = kRepulsion / Math.max(distSq, 350);
+            const fx = (dx / dist) * force;
+            const fy = (dy / dist) * force;
+
+            n1.vx -= fx;
+            n1.vy -= fy;
+            n2.vx += fx;
+            n2.vy += fy;
         }
     }
 
-    // Spring attraction along edges
+    // Spring attraction along edges (Hooke's law)
+    const idealDist = 135;
+    const springK = 0.012;
     graphData.edges.forEach(edge => {
         const src = nodePositions[edge.source];
         const tgt = nodePositions[edge.target];
@@ -180,13 +185,15 @@ function applyForcePhysics() {
         const dx = tgt.x - src.x;
         const dy = tgt.y - src.y;
         const dist = Math.hypot(dx, dy) || 1;
-        const targetDist = 130;
-        const force = (dist - targetDist) * 0.002;
+        const force = (dist - idealDist) * springK;
 
-        src.vx += dx * force;
-        src.vy += dy * force;
-        tgt.vx -= dx * force;
-        tgt.vy -= dy * force;
+        const fx = (dx / dist) * force;
+        const fy = (dy / dist) * force;
+
+        src.vx += fx;
+        src.vy += fy;
+        tgt.vx -= fx;
+        tgt.vy -= fy;
     });
 
     // Central gravity & position update
@@ -195,20 +202,28 @@ function applyForcePhysics() {
 
         const dx = centerX - n.x;
         const dy = centerY - n.y;
-        n.vx += dx * 0.0005;
-        n.vy += dy * 0.0005;
+        n.vx += dx * 0.001;
+        n.vy += dy * 0.001;
 
-        // Damping
+        // Damping / friction
         n.vx *= 0.85;
         n.vy *= 0.85;
+
+        // Speed limit
+        const speed = Math.hypot(n.vx, n.vy);
+        if (speed > 8) {
+            n.vx = (n.vx / speed) * 8;
+            n.vy = (n.vy / speed) * 8;
+        }
 
         n.x += n.vx;
         n.y += n.vy;
 
-        // Boundary padding
-        const pad = n.radius + 10;
-        n.x = Math.max(pad, Math.min(width - pad, n.x));
-        n.y = Math.max(pad, Math.min(height - pad, n.y));
+        // Boundary padding: keep nodes and labels comfortably within canvas
+        const padX = Math.max(n.radius + 15, 65);
+        const padY = n.radius + 28;
+        n.x = Math.max(padX, Math.min(width - padX, n.x));
+        n.y = Math.max(padY, Math.min(height - padY, n.y));
     });
 }
 
@@ -750,12 +765,16 @@ async function triggerRemediation() {
 
 // Ingestion Modal Functions
 function openImportModal() {
-    document.getElementById('modal-import').classList.remove('hidden');
+    const modal = document.getElementById('modal-import');
+    modal.classList.remove('hidden');
+    modal.style.display = 'flex';
     document.getElementById('import-error').classList.add('hidden');
 }
 
 function closeImportModal() {
-    document.getElementById('modal-import').classList.add('hidden');
+    const modal = document.getElementById('modal-import');
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
 }
 
 function loadSampleCompose() {
@@ -848,6 +867,7 @@ async function submitImport() {
 async function openAuditModal() {
     const modal = document.getElementById('modal-audit');
     modal.classList.remove('hidden');
+    modal.style.display = 'flex';
 
     const bodyDiv = document.getElementById('audit-body');
     bodyDiv.innerHTML = '<div class="mono-text">Generating automated SRE & DORA compliance audit...</div>';
@@ -920,5 +940,7 @@ async function openAuditModal() {
 }
 
 function closeAuditModal() {
-    document.getElementById('modal-audit').classList.add('hidden');
+    const modal = document.getElementById('modal-audit');
+    modal.classList.add('hidden');
+    modal.style.display = 'none';
 }
