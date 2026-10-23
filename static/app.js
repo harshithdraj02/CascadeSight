@@ -9,6 +9,7 @@ let simulationResult = null;
 let currentStepIndex = 0;
 let playbackTimer = null;
 let isPlaying = false;
+let riskScoresMap = {};
 
 // Canvas & Physics Engine
 let canvas = null;
@@ -25,7 +26,7 @@ let tippingChart = null;
 document.addEventListener('DOMContentLoaded', () => {
     canvas = document.getElementById('graphCanvas');
     ctx = canvas.getContext('2d');
-    
+
     resizeCanvas();
     window.addEventListener('resize', resizeCanvas);
 
@@ -63,9 +64,24 @@ async function switchGraphMode(mode) {
     document.getElementById('btn-synthetic').classList.toggle('active', mode === 'synthetic');
     document.getElementById('btn-meta').classList.toggle('active', mode === 'meta');
 
-    selectedNode = (mode === 'meta') ? 'Backbone BGP Router Config' : 'Internal Config Service';
+    const btnCustom = document.getElementById('btn-custom');
+    if (btnCustom) {
+        btnCustom.classList.toggle('active', mode === 'custom');
+    }
+
+    if (mode === 'meta') {
+        selectedNode = 'Backbone BGP Router Config';
+    } else if (mode === 'custom' && graphData.nodes && graphData.nodes.length > 0) {
+        selectedNode = graphData.nodes[0].id;
+    } else {
+        selectedNode = 'Internal Config Service';
+    }
+
     document.getElementById('lbl-selected-node').innerText = selectedNode;
-    
+
+    const remBanner = document.getElementById('remediation-banner');
+    if (remBanner) remBanner.classList.add('hidden');
+
     resetSimulation();
     await initDashboard();
 }
@@ -360,13 +376,27 @@ function updateNodeInspector(node) {
 
     inspector.classList.remove('hidden');
     document.getElementById('inspect-title').innerText = node.label;
-    
+
     const statusBadge = document.getElementById('inspect-status');
     statusBadge.innerText = node.state.toUpperCase();
     statusBadge.className = `badge-status ${node.state}`;
 
     document.getElementById('inspect-cat').innerText = node.category;
     document.getElementById('inspect-deg').innerText = `${node.degree} (${node.inDegree} in / ${node.outDegree} out)`;
+
+    // Update dynamic CRS and classification in inspector
+    const scoreItem = riskScoresMap[node.id];
+    const crsElem = document.getElementById('inspect-crs');
+    if (crsElem) {
+        crsElem.innerText = scoreItem ? scoreItem.cascadeRiskScore : 'N/A';
+    }
+    if (scoreItem && scoreItem.isHiddenCriticalNode) {
+        statusBadge.innerText = 'HSPOF DANGER';
+        statusBadge.className = 'badge-status hspof';
+    } else {
+        statusBadge.innerText = node.state.toUpperCase();
+        statusBadge.className = `badge-status ${node.state}`;
+    }
 
     // Find upstream deps
     const deps = graphData.edges.filter(e => e.target === node.id).map(e => e.source);
@@ -468,12 +498,14 @@ function togglePlayback() {
 }
 
 function startPlayback() {
+    if (!simulationResult) return;
     isPlaying = true;
     document.getElementById('btn-play').innerText = '⏸ Pause';
     if (currentStepIndex >= simulationResult.stepHistory.length - 1) {
         currentStepIndex = 0;
+        applySimulationStep(0);
     }
-    
+
     playbackTimer = setInterval(() => {
         if (currentStepIndex < simulationResult.stepHistory.length - 1) {
             applySimulationStep(currentStepIndex + 1);
@@ -489,11 +521,31 @@ function pausePlayback() {
     if (playbackTimer) clearInterval(playbackTimer);
 }
 
+async function stepForward() {
+    if (!simulationResult) {
+        await triggerCascade();
+        applySimulationStep(0);
+        return;
+    }
+    pausePlayback();
+    if (currentStepIndex < simulationResult.stepHistory.length - 1) {
+        applySimulationStep(currentStepIndex + 1);
+    }
+}
+
+async function stepBackward() {
+    if (!simulationResult) return;
+    pausePlayback();
+    if (currentStepIndex > 0) {
+        applySimulationStep(currentStepIndex - 1);
+    }
+}
+
 function resetSimulation() {
     pausePlayback();
     simulationResult = null;
     currentStepIndex = 0;
-    
+
     if (graphData.nodes) {
         graphData.nodes.forEach(n => {
             if (nodePositions[n.id]) nodePositions[n.id].state = 'healthy';
@@ -530,14 +582,16 @@ async function loadRiskScores() {
     try {
         const res = await fetch(`/api/risk-scores?type=${currentGraphMode}&threshold=${currentThreshold}`);
         const scores = await res.json();
-        
+
         const tbody = document.getElementById('tbody-leaderboard');
         tbody.innerHTML = '';
+        riskScoresMap = {};
 
         scores.forEach((item, index) => {
+            riskScoresMap[item.node] = item;
             const tr = document.createElement('tr');
-            const classification = item.isHiddenCriticalNode 
-                ? '<span class="badge pink">⚠️ Hidden Single Point</span>' 
+            const classification = item.isHiddenCriticalNode
+                ? '<span class="badge pink">⚠️ Hidden Single Point</span>'
                 : (item.degree >= 7 ? '<span class="badge red">High Connection Hub</span>' : '<span class="badge gray">Standard Node</span>');
 
             tr.innerHTML = `
@@ -578,7 +632,11 @@ async function loadTippingPoint() {
         });
 
         const data = await res.json();
-        document.getElementById('badge-tipping').innerText = `Tipping Point: θ = ${data.tippingPointThreshold.toFixed(2)}`;
+        if (data.tippingPointDetected && data.tippingPointThreshold !== null && data.tippingPointThreshold !== undefined) {
+            document.getElementById('badge-tipping').innerText = `Tipping Point: θ = ${data.tippingPointThreshold.toFixed(2)}`;
+        } else {
+            document.getElementById('badge-tipping').innerText = 'Tipping Point: No Percolation Cliff (Resilient)';
+        }
         renderTippingChart(data.curve, data.tippingPointThreshold);
     } catch (err) {
         console.error('Error loading tipping point:', err);
@@ -628,4 +686,231 @@ function renderTippingChart(curveData, tippingPointThreshold) {
             }
         }
     });
+}
+
+// ==========================================
+// ENTERPRISE MODULES: REMEDIATION & INGESTION
+// ==========================================
+
+async function triggerRemediation() {
+    try {
+        const res = await fetch('/api/remediation', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                targetNode: selectedNode,
+                threshold: currentThreshold,
+                type: currentGraphMode
+            })
+        });
+
+        const data = await res.json();
+
+        // Show banner
+        const banner = document.getElementById('remediation-banner');
+        banner.classList.remove('hidden');
+        document.getElementById('remediation-reduction').innerText = `-${data.riskReductionPercentage}% Blast Drop`;
+        document.getElementById('rem-pre-blast').innerText = `${data.preMitigation.blastRadiusPercentage}%`;
+        document.getElementById('rem-post-blast').innerText = `${data.postMitigation.blastRadiusPercentage}%`;
+        document.getElementById('rem-summary').innerText = data.executiveRecommendation;
+
+        // Apply visual fix state to node
+        if (nodePositions[selectedNode]) {
+            nodePositions[selectedNode].state = 'healthy';
+        }
+
+        // Add to causality log
+        const logContainer = document.getElementById('causalityLog');
+        const fixDiv = document.createElement('div');
+        fixDiv.className = 'log-entry info';
+        fixDiv.style.borderLeft = '3px solid #10b981';
+        fixDiv.innerText = `[MITIGATION DEPLOYED] 🛡️ Circuit breaker pattern active on [${selectedNode}]. Downstream dependents decoupled; blast radius reduced by ${data.riskReductionPercentage}%.`;
+        logContainer.prepend(fixDiv);
+
+        // Update live metrics to mitigated state
+        const total = graphData.nodes.length || 20;
+        const postFailed = data.postMitigation.totalFailedNodes;
+        const postBlast = data.postMitigation.blastRadiusPercentage;
+        document.getElementById('metric-health').innerText = `${(100 - postBlast).toFixed(1)}%`;
+        document.getElementById('metric-blast').innerText = `${postBlast.toFixed(1)}%`;
+        document.getElementById('metric-blast-nodes').innerText = `${postFailed} / ${total} Nodes (Mitigated)`;
+
+    } catch (err) {
+        console.error('Error triggering remediation:', err);
+    }
+}
+
+// Ingestion Modal Functions
+function openImportModal() {
+    document.getElementById('modal-import').classList.remove('hidden');
+    document.getElementById('import-error').classList.add('hidden');
+}
+
+function closeImportModal() {
+    document.getElementById('modal-import').classList.add('hidden');
+}
+
+function loadSampleCompose() {
+    const sample = `version: '3.8'
+services:
+  web-frontend:
+    image: nginx:alpine
+    depends_on:
+      - api-gateway
+  api-gateway:
+    depends_on:
+      - auth-service
+      - payment-service
+  auth-service:
+    depends_on:
+      - token-cache
+  payment-service:
+    depends_on:
+      - ledger-db
+  token-cache:
+    image: redis:6-alpine
+  ledger-db:
+    image: postgres:14-alpine`;
+
+    document.getElementById('import-textarea').value = sample;
+}
+
+function loadSampleJson() {
+    const sample = {
+        "services": [
+            { "name": "web-frontend", "category": "service" },
+            { "name": "api-gateway", "category": "network" },
+            { "name": "auth-service", "category": "security" },
+            { "name": "order-service", "category": "service" },
+            { "name": "payment-gateway", "category": "network" },
+            { "name": "inventory-db", "category": "storage" }
+        ],
+        "dependencies": [
+            { "from": "api-gateway", "to": "web-frontend" },
+            { "from": "auth-service", "to": "api-gateway" },
+            { "from": "order-service", "to": "api-gateway" },
+            { "from": "payment-gateway", "to": "order-service" },
+            { "from": "inventory-db", "to": "order-service" }
+        ]
+    };
+    const radio = document.querySelector('input[name="import-format"][value="json"]');
+    if (radio) radio.checked = true;
+    document.getElementById('import-textarea').value = JSON.stringify(sample, null, 2);
+}
+
+async function submitImport() {
+    const content = document.getElementById('import-textarea').value.trim();
+    const format = document.querySelector('input[name="import-format"]:checked').value;
+    const errDiv = document.getElementById('import-error');
+
+    if (!content) {
+        errDiv.innerText = 'Please paste a valid docker-compose YAML or JSON architecture.';
+        errDiv.classList.remove('hidden');
+        return;
+    }
+
+    try {
+        const res = await fetch('/api/import-architecture', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content, format })
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+            errDiv.innerText = data.error || 'Failed to parse architecture manifest.';
+            errDiv.classList.remove('hidden');
+            return;
+        }
+
+        // Success: enable Custom Architecture mode
+        closeImportModal();
+        const btnCustom = document.getElementById('btn-custom');
+        btnCustom.style.display = 'inline-block';
+        btnCustom.innerText = `📦 Custom Graph (${data.totalNodes} Services)`;
+
+        await switchGraphMode('custom');
+    } catch (err) {
+        errDiv.innerText = 'Network error communicating with ingestion API: ' + err.message;
+        errDiv.classList.remove('hidden');
+    }
+}
+
+// Audit Modal Functions
+async function openAuditModal() {
+    const modal = document.getElementById('modal-audit');
+    modal.classList.remove('hidden');
+
+    const bodyDiv = document.getElementById('audit-body');
+    bodyDiv.innerHTML = '<div class="mono-text">Generating automated SRE & DORA compliance audit...</div>';
+
+    try {
+        const res = await fetch(`/api/audit-report?type=${currentGraphMode}&threshold=${currentThreshold}`);
+        const data = await res.json();
+
+        document.getElementById('audit-report-id').innerText = `🛡️ Enterprise Resilience Audit — ${data.reportId}`;
+        document.getElementById('audit-timestamp').innerText = `Audit Timestamp: ${data.timestamp} | Target: ${data.architectureType}`;
+
+        bodyDiv.innerHTML = `
+            <div class="audit-grid">
+                <div class="audit-box">
+                    <div class="lbl">Fragility Grade</div>
+                    <div class="val" style="color: ${data.systemFragilityGrade.includes('CRITICAL') ? '#ef4444' : '#10b981'}">${data.systemFragilityGrade}</div>
+                </div>
+                <div class="audit-box">
+                    <div class="lbl">Total Microservices</div>
+                    <div class="val">${data.totalMicroservices} Nodes</div>
+                </div>
+                <div class="audit-box">
+                    <div class="lbl">Average Blast Radius</div>
+                    <div class="val">${data.averageBlastRadius}%</div>
+                </div>
+                <div class="audit-box">
+                    <div class="lbl">HSPOF Vulnerabilities</div>
+                    <div class="val text-glow" style="color: #ec4899">${data.totalHSPOFsIdentified} Detected</div>
+                </div>
+            </div>
+
+            <div class="audit-section-title">Regulatory & Standards Compliance</div>
+            <div class="compliance-table">
+                <div class="compliance-row">
+                    <span>EU DORA Article 11 (ICT Concentration & Single Points of Failure):</span>
+                    <strong style="color: ${data.regulatoryCompliance.doraArticle11_ICTConcentration === 'COMPLIANT' ? '#10b981' : '#ef4444'}">${data.regulatoryCompliance.doraArticle11_ICTConcentration}</strong>
+                </div>
+                <div class="compliance-row">
+                    <span>ISO 22301 (Business Continuity & Resilient Operation):</span>
+                    <strong style="color: ${data.regulatoryCompliance.iso22301_BusinessContinuity === 'VERIFIED' ? '#10b981' : '#f59e0b'}">${data.regulatoryCompliance.iso22301_BusinessContinuity}</strong>
+                </div>
+            </div>
+
+            <div class="audit-section-title">Critical Systemic Threat Spotlight</div>
+            <div class="compliance-table">
+                <div class="compliance-row">
+                    <span>Top Vulnerability Target:</span>
+                    <strong>${data.topSystemicThreat.node || 'N/A'} (Degree: ${data.topSystemicThreat.degree || 0})</strong>
+                </div>
+                <div class="compliance-row">
+                    <span>Potential Cascade Blast:</span>
+                    <span style="color: #ef4444">${data.topSystemicThreat.blastRadiusPercentage || 0}% Total Ecosystem Collapse</span>
+                </div>
+                <div class="compliance-row">
+                    <span>Cascade Risk Score (CRS):</span>
+                    <strong class="highlight">${data.topSystemicThreat.cascadeRiskScore || 0}</strong>
+                </div>
+            </div>
+
+            <div class="audit-section-title">Mandatory Architectural Remediation Steps</div>
+            <div class="patches-list">
+                <ul>
+                    ${data.recommendedArchitecturalPatches.map(p => `<li>${p}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    } catch (err) {
+        bodyDiv.innerHTML = `<div class="error-msg">Error loading audit report: ${err.message}</div>`;
+    }
+}
+
+function closeAuditModal() {
+    document.getElementById('modal-audit').classList.add('hidden');
 }
