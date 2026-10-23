@@ -22,7 +22,7 @@
                     <span class="subtitle">Systemic Infrastructure Cascade Risk Predictor & Collapse Simulator</span>
                 </div>
             </div>
-            
+
             <div class="nav-controls">
                 <div class="mode-toggle">
                     <button id="btn-synthetic" class="toggle-btn active" onclick="switchGraphMode('synthetic')">
@@ -31,14 +31,25 @@
                     <button id="btn-meta" class="toggle-btn" onclick="switchGraphMode('meta')">
                         🌐 Meta Oct 2021 Case Study
                     </button>
+                    <button id="btn-custom" class="toggle-btn" style="display:none;" onclick="switchGraphMode('custom')">
+                        📦 Custom Architecture
+                    </button>
                 </div>
-                <div class="badge-tag">TST Competition Prototype</div>
+                <div class="enterprise-actions" style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn btn-sm btn-outline" onclick="openImportModal()">
+                        📥 Import K8s / Compose
+                    </button>
+                    <button class="btn btn-sm btn-accent" onclick="openAuditModal()">
+                        🛡️ SRE Audit Report
+                    </button>
+                </div>
+                <div class="badge-tag">Production Resilience Engine</div>
             </div>
         </header>
 
         <!-- Main Dashboard Content -->
         <main class="dashboard-grid">
-            
+
             <!-- Left Column: Graph Visualizer & Simulation Controls -->
             <section class="card graph-card">
                 <div class="card-header">
@@ -46,7 +57,7 @@
                         <h2>Interactive Dependency Graph</h2>
                         <span class="hint">Click or drag any node to inspect & select as failure trigger</span>
                     </div>
-                    
+
                     <div class="graph-legend">
                         <span class="legend-item"><i class="dot healthy"></i> Healthy</span>
                         <span class="legend-item"><i class="dot at-risk"></i> At Risk</span>
@@ -67,7 +78,7 @@
                 <!-- Interactive Canvas -->
                 <div class="canvas-container" id="canvasContainer">
                     <canvas id="graphCanvas"></canvas>
-                    
+
                     <!-- Overlay Trigger Tag -->
                     <div id="canvas-overlay" class="canvas-overlay">
                         <div class="overlay-stat">
@@ -95,19 +106,50 @@
                 <div class="control-bar">
                     <div class="control-group">
                         <button id="btn-trigger" class="btn btn-danger" onclick="triggerCascade()">
-                            🔥 Fail Selected Node & Run Cascade
+                            🔥 Fail Node & Run Cascade
+                        </button>
+                        <button id="btn-remediate" class="btn btn-success" onclick="triggerRemediation()">
+                            🛡️ Apply Circuit Breaker & Fix
                         </button>
                         <button id="btn-play" class="btn btn-secondary" onclick="togglePlayback()">
                             ▶ Play Step-by-Step
                         </button>
+                        <button id="btn-prev" class="btn btn-outline btn-sm" onclick="stepBackward()" title="Previous Timestep">
+                            ⏮ Step
+                        </button>
+                        <button id="btn-next" class="btn btn-outline btn-sm" onclick="stepForward()" title="Next Timestep">
+                            ⏭ Step
+                        </button>
                         <button id="btn-reset" class="btn btn-outline" onclick="resetSimulation()">
-                            🔄 Reset Graph
+                            🔄 Reset
                         </button>
                     </div>
 
                     <div class="control-group threshold-slider">
                         <label for="slider-threshold">Redundancy Tolerance (θ): <strong id="val-threshold">0.40</strong></label>
                         <input type="range" id="slider-threshold" min="0.10" max="0.80" step="0.05" value="0.40" oninput="updateThreshold(this.value)">
+                    </div>
+                </div>
+
+                <!-- Remediation Comparative Banner (Hidden by default) -->
+                <div id="remediation-banner" class="remediation-banner hidden">
+                    <div class="remediation-header">
+                        <span class="remediation-tag">⚡ ARCHITECTURAL REMEDIATION APPLIED</span>
+                        <span id="remediation-reduction" class="remediation-badge">-85.0% Risk Reduction</span>
+                    </div>
+                    <div class="remediation-content">
+                        <div class="remediation-col">
+                            <span class="label">Pre-Mitigation Blast:</span>
+                            <strong id="rem-pre-blast" class="text-danger">80.0%</strong>
+                        </div>
+                        <div class="remediation-arrow">➔</div>
+                        <div class="remediation-col">
+                            <span class="label">Post-Mitigation Blast:</span>
+                            <strong id="rem-post-blast" class="text-success">15.0%</strong>
+                        </div>
+                        <div class="remediation-col summary-col">
+                            <span id="rem-summary" class="summary-text">Circuit breaker & fallback cache isolated the failure wave.</span>
+                        </div>
                     </div>
                 </div>
 
@@ -125,7 +167,7 @@
 
             <!-- Right Column: Live Metrics, Leaderboard & Tipping Point -->
             <aside class="right-panel">
-                
+
                 <!-- Live Impact Metrics -->
                 <div class="metrics-row">
                     <div class="metric-card">
@@ -133,7 +175,7 @@
                         <span id="metric-health" class="metric-value green">100.0%</span>
                         <span class="metric-sub">Operational Nodes</span>
                     </div>
-                    
+
                     <div class="metric-card">
                         <span class="metric-label">Blast Radius</span>
                         <span id="metric-blast" class="metric-value red">0.0%</span>
@@ -156,7 +198,7 @@
                         </div>
                         <input type="text" id="input-search-node" placeholder="🔍 Search node..." onkeyup="filterLeaderboard(this.value)" class="search-input">
                     </div>
-                    
+
                     <div class="table-container">
                         <table class="data-table">
                             <thead>
@@ -192,6 +234,56 @@
 
             </aside>
         </main>
+    </div>
+
+    <!-- Modal: Architecture Import -->
+    <div id="modal-import" class="modal-overlay hidden" onclick="if(event.target === this) closeImportModal()">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>📥 Ingest Live Infrastructure Manifest</h3>
+                <button class="btn-close" onclick="closeImportModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <p class="modal-desc">Paste your real <code>docker-compose.yml</code> or cloud microservices JSON dependency graph to dynamically simulate cascade resilience.</p>
+
+                <div class="modal-format-toggle">
+                    <label><input type="radio" name="import-format" value="docker-compose" checked> Docker Compose (YAML)</label>
+                    <label><input type="radio" name="import-format" value="json"> OpenTelemetry / Cloud Graph (JSON)</label>
+                </div>
+
+                <textarea id="import-textarea" class="code-textarea" rows="10" placeholder="Paste docker-compose.yml or JSON architecture here..."></textarea>
+
+                <div class="sample-actions" style="display: flex; gap: 16px;">
+                    <button class="btn-link" onclick="loadSampleCompose()">Load E-Commerce Sample (YAML)</button>
+                    <button class="btn-link" onclick="loadSampleJson()">Load Cloud Services Sample (JSON)</button>
+                </div>
+                <div id="import-error" class="error-msg hidden"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="closeImportModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="submitImport()">🚀 Ingest & Analyze Topology</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: SRE Resilience Audit Report -->
+    <div id="modal-audit" class="modal-overlay hidden" onclick="if(event.target === this) closeAuditModal()">
+        <div class="modal-card modal-large">
+            <div class="modal-header">
+                <div>
+                    <h3 id="audit-report-id">🛡️ Enterprise SRE & DORA Resilience Audit Report</h3>
+                    <span id="audit-timestamp" class="mono-text text-muted">Audited: 2026-10-23</span>
+                </div>
+                <button class="btn-close" onclick="closeAuditModal()">✕</button>
+            </div>
+            <div class="modal-body" id="audit-body">
+                <!-- Dynamically populated by app.js -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-outline" onclick="window.print()">🖨️ Print / Save as PDF</button>
+                <button class="btn btn-primary" onclick="closeAuditModal()">Close Audit View</button>
+            </div>
+        </div>
     </div>
 
     <script src="app.js"></script>
